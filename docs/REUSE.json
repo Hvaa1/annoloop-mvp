@@ -1,0 +1,45 @@
+[
+  {
+    "original": "buildphase/lidar_qa_demo/core.py",
+    "original_sha256": "c6bbacfb061c97e6455db43a94629b1deb2c2fd0477ee8c5bc315f75ae801f78",
+    "copied_to": "src/annoloop/reused/core.py",
+    "copied_sha256": "0a3658a47e8acf08f0e0b321d81247005e940bee4e0b5130684d7d1aa3ad9443"
+  },
+  {
+    "original": "buildphase/lidar_qa_demo/checkpoint_policy.py",
+    "original_sha256": "6dcc7c88a2b1b7b1b7fb49104ecd4e3e9c1ad826ab991554731b39334c5b4c8a",
+    "copied_to": "src/annoloop/reused/checkpoint_policy.py",
+    "copied_sha256": "6dcc7c88a2b1b7b1b7fb49104ecd4e3e9c1ad826ab991554731b39334c5b4c8a"
+  },
+  {
+    "original": "buildphase/lidar_qa_demo/training_monitor.py",
+    "original_sha256": "38ee4630414684a6871d8d0ed36bba83fc129ff20115ec05db1c35b10bcf46f8",
+    "copied_to": "src/annoloop/reused/training_monitor.py",
+    "copied_sha256": "3d708b4c98f27c088682dd22b695f9dc2b34d06e84b6969956a5e0d24890312e"
+  },
+  {
+    "original": "buildphase/lidar_qa_demo/experiments/gold_geometry.py",
+    "original_sha256": "16cc6c746148eaeb7c339826bb3c15f0c2cccf78e10b195ebb955ba4692899aa",
+    "copied_to": "src/annoloop/reused/geometry.py",
+    "copied_sha256": "16cc6c746148eaeb7c339826bb3c15f0c2cccf78e10b195ebb955ba4692899aa"
+  },
+  {
+    "original": "buildphase/lidar_qa_demo/temporal_qa/tracking.py",
+    "original_sha256": "521f214df4bce1d880b198009be0445cea6edf6ccd292dda89859dd0f4311260",
+    "copied_to": "src/annoloop/reused/tracking.py",
+    "copied_sha256": "94bfe884cc86fcc5337dede473d74badcbfc10a921a74f968d7d798081512019"
+  },
+  {
+    "original": "buildphase/lidar_qa_demo/co_training/consensus.py:isotonic",
+    "original_sha256": "6db6a2de49d511c47f9c016713f8d9e063e0d91e5b0a83008bb6eed9686fd573",
+    "copied_to": "src/annoloop/reused/calibration.py",
+    "copied_sha256": "2b435ecf48b6ceb4378de52f9044ce7be9e2073d375813137870f19ee69b564d"
+  },
+  {
+    "original": "buildphase/lidar_qa_demo/cuda_runtime.py",
+    "original_sha256": "7a6593dd30d9c3e6c5a8d5abd7930c07aeadb1a1603263a269fb4001ab1eb427",
+    "copied_to": "src/annoloop/runtime.py",
+    "copied_sha256": "cf9a76dfd7f61745442c044b08d7a3d56844d0a2194338923736639a80f99591",
+    "note": "Adapted configure_sparse_headers and NVRTC library alias ideas; original demo file unchanged."
+  }
+]

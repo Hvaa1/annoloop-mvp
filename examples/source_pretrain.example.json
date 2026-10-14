@@ -1,0 +1,8 @@
+{
+  "config": "/replace/with/materialized_source.yaml",
+  "runtime": "/replace/with/compiled_ST3D",
+  "source_train_annotations": "/replace/with/source_train.json",
+  "source_validation_annotations": "/replace/with/source_validation.json",
+  "checkpoint_metadata": "/replace/with/verified_checkpoint.metadata.json",
+  "seed": 42
+}

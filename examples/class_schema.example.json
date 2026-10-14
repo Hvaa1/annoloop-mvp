@@ -1,0 +1,6 @@
+{
+  "schema_version": "1.0",
+  "data_type": "3d",
+  "annotation_type": "cuboid",
+  "classes": ["car", "truck", "bus", "pedestrian", "motorcycle", "bicycle"]
+}

@@ -1,0 +1,8 @@
+# Tested application profile, Python 3.10 on Linux.
+numpy==2.2.6
+scipy==1.15.3
+PyYAML==6.0.3
+streamlit==1.65.0
+plotly==6.9.0
+pypcd4==1.5.1
+cvat-sdk==2.76.0

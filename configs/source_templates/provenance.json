@@ -1,0 +1,50 @@
+{
+  "secondiou_nuscenes_car_xyz.yaml": {
+    "sha256": "4b9a8fb2e1ec8c67de8c543ff90e32e33f5b070bef940b21961bfa4b943cc68a",
+    "origin_config": "historical-demo/configs/workflow_secondiou_xyz.yaml",
+    "origin_sha256": "73556a497f32c6c814c7d975d0e2d48267ac667bb1da814fbc34b79fcce60aa4",
+    "model_origin": "historical-demo/configs/workflow_secondiou_xyz.yaml",
+    "model_origin_sha256": "73556a497f32c6c814c7d975d0e2d48267ac667bb1da814fbc34b79fcce60aa4",
+    "architecture": "SECONDNetIoU",
+    "classes": [
+      "car"
+    ],
+    "validated": "YAML/source_config/info paths/inventory only; no model or GPU run"
+  },
+  "pvrcnn_nuscenes_car_xyz.yaml": {
+    "sha256": "06ccefb956a7aa96b45081a8ed7f4c8109f9598d8aa92f5f49a380ba4965c27f",
+    "origin_config": "historical-demo/configs/workflow_secondiou_xyz.yaml",
+    "origin_sha256": "73556a497f32c6c814c7d975d0e2d48267ac667bb1da814fbc34b79fcce60aa4",
+    "model_origin": "vendor/ST3D/tools/cfgs/da-waymo-nus_models/pvrcnn/pvrcnn.yaml",
+    "model_origin_sha256": "c32611fef9bb19f18b762016854d6ab89270e93c7d2174b8948efce31157f334",
+    "architecture": "PVRCNN",
+    "classes": [
+      "car"
+    ],
+    "validated": "YAML/source_config/info paths/inventory only; no model or GPU run"
+  },
+  "secondiou_nuscenes_car_pedestrian_xyz.yaml": {
+    "sha256": "f1550faac8d8909376ceb08cc631a2ebbc512859475badd341173dda526c7639",
+    "base_template": "configs/source_templates/secondiou_nuscenes_car_xyz.yaml",
+    "base_template_sha256": "4b9a8fb2e1ec8c67de8c543ff90e32e33f5b070bef940b21961bfa4b943cc68a",
+    "pedestrian_anchor_origin": "vendor/ST3D/tools/cfgs/da-nuscenes-kitti_models/secondiou/secondiou_ped.yaml",
+    "pedestrian_anchor_origin_sha256": "f114082507a403e2afb978b3800ccf7065b8c128ebe0952e26107bd71fba7443",
+    "classes": [
+      "car",
+      "pedestrian"
+    ],
+    "validated": "YAML/source_config/source inventories; no GPU training test"
+  },
+  "pvrcnn_nuscenes_car_pedestrian_xyz.yaml": {
+    "sha256": "140913736cdb1444b3e512257b556c6525e782f6c45cd5967bba30df9358a3c6",
+    "base_template": "configs/source_templates/pvrcnn_nuscenes_car_xyz.yaml",
+    "base_template_sha256": "06ccefb956a7aa96b45081a8ed7f4c8109f9598d8aa92f5f49a380ba4965c27f",
+    "pedestrian_anchor_origin": "vendor/ST3D/tools/cfgs/da-nuscenes-kitti_models/secondiou/secondiou_ped.yaml",
+    "pedestrian_anchor_origin_sha256": "f114082507a403e2afb978b3800ccf7065b8c128ebe0952e26107bd71fba7443",
+    "classes": [
+      "car",
+      "pedestrian"
+    ],
+    "validated": "YAML/source_config/source inventories; no GPU training test"
+  }
+}
