@@ -1,8 +1,45 @@
 # Bàn giao UI cho Astra
 
+15/10 final delivery: bỏ warning/nút upload placeholder, nối ui/delivery_page.py
+vào Xuất CVAT. A/B chốt checkpoint vòng đang chọn; ensemble chốt lượt hoàn tất.
+Scope rõ adaptation+delivery/delivery/all, final inference riêng → PCD+annotation
+mapping → explicit create/upload task shape qua SDK. Không tự inference/upload
+khi xem trang; credential không persist, không dùng snapshot labels làm final.
+Chỉ shape, chưa track/2D. Đọc FINAL_DELIVERY.md; actual GPU/CVAT chưa kiểm chứng.
+
+15/10: bước Class & model có nhánh **Ghép checkpoint local** đọc receipt/config
+từ state app, hiện cả official ST3D downloads bị chặn. Branch chọn → chuẩn bị →
+chạy → sample tích hợp trong năm bước cũ, không thêm page riêng. Inference-only,
+không N-model training. Xem LOCAL_ENSEMBLE.md; không tự mở quyền cho imports,
+không dùng chứng nhận A/B để giả ensemble GPU đã kiểm tra. Giữ A/B lịch sử riêng.
+
+Workflow đã được chỉnh tiếp theo phản hồi người dùng: năm bước chính Dữ liệu →
+Class & model → Chuẩn bị model → Adaptation → Kết quả/CVAT. Sidebar pages cũ
+chuyển vào Công cụ & hướng dẫn. `project_models.py` là nơi duy nhất chọn A/B;
+`adaptation.json.model_selection` giữ intent local/hub/source, kể cả model chưa
+tải. `save_model_selection` resolve cache/nguồn sang binding; không download.
+Trang chuẩn bị nhận đúng intent, tải/bind chỉ khi bấm; adaptation chỉ đọc model,
+không còn dropdown chọn lại. Generic train chưa có vẫn bị chặn rõ, không nhầm
+thành thiếu class để bắt pretrain. Dự án/lượt cũ giữ checkpoint gốc.
+
+Cập nhật tiếp15/10: người dùng yêu cầu chỉ viết code, không tải model bây giờ.
+Nút **Chọn model & chuẩn bị adapter** gửi worker `model_hub setup` đúng model
+được chọn: tải/cache → `adapter_factory.prepare_adapter` → `adapter.json`.
+Xem/chuyển lựa chọn không có side effect mạng/GPU. FrameworkAdapter có code
+raw predict qua framework_worker; chưa chạy forward thật. Trạng thái binding
+prepared_unverified; generic target train/calibration/signed-ignore chưa nối,
+không mở native readiness chỉ vì binding được tạo. Chi tiết MODEL_HUB.md.
+
+Cập nhật15/10: sidebar **Kho model** tại `ui/model_library.py`, backend
+`model_hub.py`, danh mục `src/annoloop/catalog/models.json`. Wizard có liên kết
+chuyển class sang thư viện; xem `MODEL_HUB.md`. 62gói/19họ-biến thể/7dataset,
+đã probe binary; download background có progress/pause/resume. Mọi model mới
+vẫn adapter_required; không mở nút native adaptation hoặc bỏ kiểm tra GPU chỉ
+vì tải xong weights. Page view/refresh không tự tải hay train.
+
 Cập nhật 13/10/2026: người dùng đã yêu cầu dựng UI. Giao diện hiện có tại `ui/app.py`;
 xem `USER_GUIDE.md`. Nội dung bên dưới giữ làm định hướng; chưa tạo Docker.
-Làm UI Streamlit trong `ui/` riêng; `.venv` được tạo bằng scripts/setup.sh.
+Làm UI Streamlit trong `ui/` riêng; `.venv` VIN_Ai đã có Streamlit 1.65.0.
 Không thay backend bằng code UI hoặc dữ liệu mẫu giả. NativeDetectorAdapter
 đã nối trong adaptation.py/adaptation_worker.py; nút chạy dựa trên readiness
 của dự án (checkpoint, coordinates và verification), không mở vô điều kiện.
@@ -32,8 +69,10 @@ contract, chưa có detector. Không cho bật ROS 3D trên 2D.
 
 `RoundController` dùng NativeDetectorAdapter qua subprocess model venv. Source/
 target predict và target trainer source-assisted đã có; kiểm tra GPU A → B có
-0 optimizer step. Mỗi dự án mới cần kiểm tra GPU trên dữ liệu/checkpoint của chính nó.
-Không mang chứng nhận từ máy hoặc dự án khác sang. Final delivery/CVAT chưa enable.
+0 optimizer step. Project Test (`60fdb405fa904512`) đã có A epoch 10 và B
+epoch 20, đủ car/pedestrian/motorcycle; cả hai đã kiểm tra GPU thành công ngày
+14/10/2026. M1 cũ bị ngắt trong predict A, chưa hoàn tất vòng adaptation.
+Final delivery/CVAT chưa enable.
 Streamlit gọi worker/background service, không gọi vòng train trực tiếp trong
 script page. State bền ở backend, `session_state` chỉ lưu selection/view.
 Không giữ thread executor làm nguồn duy nhất xác định run đang sống.

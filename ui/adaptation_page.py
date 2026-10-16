@@ -25,6 +25,12 @@ def page(store, settings, project):
     a.metric('Vòng hoàn tất', f"{len(project['completed_rounds'])}/{project['max_rounds']}")
     b.metric('Huấn luyện', 'Từng vòng' if project['execution_mode'] == 'manual' else 'Tự động')
     c.metric('Nhãn đang dùng', project['selected_version'] or 'Chưa chọn')
+    from annoloop.final_delivery import active as delivery_active
+    if delivery_active(store,pid):
+        st.info('Final predict đang chạy. Theo dõi tại Xuất CVAT; chờ lượt này dừng trước khi train tiếp.')
+        if st.button('Xem final predict →'):
+            st.session_state['pending_navigation']='Xuất CVAT';st.rerun()
+        return
     st.caption('Chọn nhãn: ' + ('tự động theo ngưỡng' if project['selection_policy']['mode'] == 'automatic' else
                               'duyệt từng vòng bằng tay'))
     selection_status(store, project)
@@ -32,27 +38,39 @@ def page(store, settings, project):
                 '<span>Train A → B</span><span>Sample & chọn vòng</span></div>', unsafe_allow_html=True)
     check = adaptation.readiness(store, pid)
     config = check['config']
-    choices = adaptation.model_choices(store, pid, settings)
     active_path = adaptation.active_job(store, pid)
     active = bool(active_path)
     st.session_state[f'adaptation_waiting_{pid}'] = active_path
     with st.container(border=True):
-        st.subheader('1. Chọn checkpoint khởi tạo')
-        selected = {}
-        for col, key, title in zip(st.columns(2), ('A', 'B'), ('SECOND-IoU', 'PV-RCNN')):
+        st.subheader('1. Model đã chọn cho dự án')
+        selected = {key:config['models'].get(key,{}).get('path') for key in ('A','B')}
+        for col, key in zip(st.columns(2), ('A', 'B')):
             with col:
-                candidates = {m['path']: m for m in choices[key]}
-                current = config['models'].get(key, {}).get('path')
-                options = [None] + list(candidates)
-                selected[key] = st.selectbox(f'Detector {key} · {title}', options,
-                    index=options.index(current) if current in candidates else (1 if len(candidates) == 1 else 0),
-                    format_func=lambda path, items=candidates: items[path]['name'] if path else 'Chọn checkpoint',
-                    key=f'adapt_model_{pid}_{key}', disabled=active)
-                if not candidates:
-                    st.info('Chưa có checkpoint hỗ trợ đủ: ' + ', '.join(project['schema']['classes']))
-                elif selected[key] and candidates[selected[key]]['intermediate']:
-                    st.caption('Checkpoint trung gian. Dùng để thử hướng đi; kiểm tra chất lượng trước khi dùng nhãn tự động.')
-        st.caption('Tool lấy config/class từ run đã lưu. Chọn checkpoint ở đây không sửa trạng thái source train và không tự train lại.')
+                candidate=config['models'].get(key)
+                st.markdown('**Model '+key+'**')
+                if candidate:
+                    st.write(candidate['architecture']);st.caption(candidate.get('name',Path(candidate['path']).name))
+                    if candidate.get('backend')=='registry_framework':
+                        from annoloop.hub_selection import blockers as hub_blockers
+                        st.caption('Kho model · '+candidate['architecture']+' · '+candidate['framework'])
+                        st.caption('Class checkpoint: '+', '.join(candidate['classes']))
+                        for reason in hub_blockers(candidate,config.get('adaptation_classes',project['schema']['classes'])):st.warning(reason)
+                    elif candidate['intermediate']:
+                        st.caption('Checkpoint trung gian. Dùng để thử hướng đi; kiểm tra chất lượng trước khi dùng nhãn tự động.')
+                else:
+                    planned=config.get('model_selection',{}).get(key,{})
+                    if planned.get('kind')=='hub':
+                        from annoloop.model_hub import load_catalog
+                        meta=next((m for m in load_catalog()['models'] if m['id']==planned['id']),None)
+                        if meta:st.write(meta['architecture']+' · '+meta['dataset']);st.caption(meta['name'])
+                        st.info('Đã chọn model; chưa hoàn tất bước Chuẩn bị model.')
+                    elif planned.get('kind')=='source':st.info('Đã chọn học nguồn; chờ checkpoint ở bước Chuẩn bị model.')
+                    else:st.info('Chưa chọn model. Quay lại bước 2.')
+        if st.button('← Quay lại Class & model',disabled=active):
+            st.session_state['pending_navigation']='Class & nguồn';st.rerun()
+        st.caption('Adaptation dùng model đã lưu ở bước Class & model. Trang này chỉ xác nhận dữ liệu và cấu hình vòng chạy.')
+        if project['completed_rounds']:
+            st.info('Dự án đã có vòng hoàn tất: giữ checkpoint khởi tạo để bảo toàn lịch sử. Muốn đổi model gốc, tạo dự án mới từ cùng dataset.')
         scope_key = f'adapt_classes_{pid}'
         saved_scope = config.get('adaptation_classes', project['schema']['classes'])
         stamp_key = f'adapt_scope_saved_at_{pid}'

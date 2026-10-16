@@ -179,12 +179,12 @@ def prepare_project(store, settings, name, source, target, classes, models, roun
             base=yaml.safe_load(template.read_text())
             native={a['class_name'] for a in base['MODEL']['DENSE_HEAD']['ANCHOR_GENERATOR_CONFIG']}
             overrides=[]
-            for name in classes:
-                if name in native:continue
-                stats=source['anchor_statistics'].get(name)
-                if not stats:raise ValueError('Source infos thiếu geometry để tự tạo anchor cho '+name)
+            for class_name in classes:
+                if class_name in native:continue
+                stats=source['anchor_statistics'].get(class_name)
+                if not stats:raise ValueError('Source infos thiếu geometry để tự tạo anchor cho '+class_name)
                 shift=base['DATA_CONFIG'].get('SHIFT_COOR',[0,0,0])[2]
-                overrides.append(dict(class_name=name,anchor_sizes=[stats['size']],anchor_rotations=[0,1.57],
+                overrides.append(dict(class_name=class_name,anchor_sizes=[stats['size']],anchor_rotations=[0,1.57],
                     anchor_bottom_heights=[stats['bottom_z']+shift],align_center=False,feature_map_stride=8,
                     matched_threshold=.5,unmatched_threshold=.35))
             config=source_config(template,schema,source['loader_root'],epochs,ros,anchor_overrides=overrides)

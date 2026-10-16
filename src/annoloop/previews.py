@@ -1,6 +1,7 @@
 """Read saved target predictions, including interrupted rounds; never run a model."""
 from functools import lru_cache
 from pathlib import Path
+import os
 import numpy as np
 from .io import digest, read
 from .predictions import validate_predictions
@@ -30,13 +31,19 @@ def _target_run(spec_path, expected, frame_lookup):
         return None
     frames = spec.get('frames', [])
     available = {}
+    directory = spec_path.parent / 'frames'
+    try:
+        with os.scandir(directory) as entries:
+            saved = {entry.name for entry in entries if entry.is_file()}
+    except FileNotFoundError:
+        saved = set()
     for index, frame in enumerate(frames):
         known = frame_lookup.get(frame['frame_id'])
         if (not known or known['split'] != 'adaptation'
             or known['sha256'] != frame['sha256'] or known['media'] != frame['media']):
             return None
         path = spec_path.parent / 'frames' / f'{index:06d}.json'
-        if path.is_file():
+        if path.name in saved:
             available[frame['frame_id']] = str(path)
     result_path = spec_path.parent / 'result.json'
     complete = False
@@ -65,6 +72,7 @@ def saved_attempts(store, pid):
         if spec.get('mode') != 'run' or spec.get('dataset_sha256') != project['dataset_sha256']:
             continue
         state = job_status(path.parent)
+        runs_cache = {}
         works = list((root / 'work').glob(f'M*/attempts/{path.parent.name}'))
         if not works and state.get('work_directory'):
             work = Path(state['work_directory'])
@@ -88,7 +96,10 @@ def saved_attempts(store, pid):
                 runs = sorted((path.parent / key / 'target').glob('*/spec.json'),
                               key=lambda p: p.stat().st_mtime, reverse=True)
                 for run_path in runs:
-                    run = _target_run(run_path, model, frame_lookup)
+                    cache_key = (str(run_path), key)
+                    if cache_key not in runs_cache:
+                        runs_cache[cache_key] = _target_run(run_path, model, frame_lookup)
+                    run = runs_cache[cache_key]
                     if not run:
                         continue
                     for phase, hashes in (('before', before_hashes), ('after', after_hashes)):

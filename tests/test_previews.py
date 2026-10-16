@@ -118,6 +118,20 @@ class PreviewTests(unittest.TestCase):
             self.assertEqual(a['phases']['after']['A']['checkpoint_sha256'],expected)
         self.assertEqual(previews.prediction(attempts[0]['phases']['after']['A'],'one')['boxes'][0]['box'][0],8.)
 
+    def test_multi_round_scan_reuses_run_index_but_sees_new_and_removed_frames(self):
+        self.test_each_round_is_linked_to_its_own_trained_checkpoint()
+        with patch.object(previews,'_target_run',wraps=previews._target_run) as inspect:
+            previews.saved_attempts(self.store,self.pid)
+            paths=[str(call.args[0]) for call in inspect.call_args_list]
+            self.assertEqual(len(paths),len(set(paths)))
+        path=self.job/'B/target/after/frames/000001.json'
+        write(path,dict(frame_id=self.frames[1]['frame_id'],boxes=[]))
+        attempt=next(a for a in previews.saved_attempts(self.store,self.pid) if a['version']=='M1')
+        self.assertEqual(attempt['phases']['after']['B']['completed'],2)
+        path.unlink()
+        attempt=next(a for a in previews.saved_attempts(self.store,self.pid) if a['version']=='M1')
+        self.assertEqual(attempt['phases']['after']['B']['completed'],1)
+
 
 if __name__ == '__main__':
     unittest.main()

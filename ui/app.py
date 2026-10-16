@@ -17,7 +17,7 @@ from annoloop.io import read
 from annoloop.projects import ProjectStore
 from annoloop.settings import Settings
 from components import box_plot, cards, chips, empty, hero, tail
-from onboarding import wizard
+from onboarding import wizard,new_project,select_project
 from inspection_page import model_inspection
 from adaptation_page import page as adaptation_ui
 from prediction_page import saved_predictions
@@ -26,12 +26,29 @@ from memory_page import memory_view
 from annoloop.selection import SelectionPolicy
 from annoloop.inspection import checkpoint_choices
 from annoloop.setup import launch_required, refresh_training_result
+from model_library import library as model_library_ui
+from project_models import selection_step,prepare_selected
+import local_ensemble_ui
+from annoloop import local_ensemble
+from delivery_page import page as delivery_ui
+from result_viewer import final_panel
+from native_sources_ui import prepare_native_sources
 
 st.set_page_config(page_title='AnnoLoop · Local annotation studio', page_icon='◈', layout='wide')
 st.markdown('<style>'+ (ROOT/'ui/assets/style.css').read_text() + '</style>', unsafe_allow_html=True)
 settings = Settings.load()
 store = ProjectStore(settings.data)
-PAGES = ['Tổng quan', 'Dữ liệu', 'Class & nguồn', 'Huấn luyện nguồn', 'Vòng adaptation', 'So sánh phiên bản', 'Xuất CVAT', 'Hướng dẫn & thiết bị', 'Kiểm tra model']
+PAGES = ['Tổng quan', 'Dữ liệu', 'Class & nguồn', 'Huấn luyện nguồn', 'Vòng adaptation', 'So sánh phiên bản', 'Xuất CVAT', 'Hướng dẫn & thiết bị', 'Kiểm tra model', 'Kho model']
+
+
+def model_library_page():
+    current=st.session_state.get('project_id')
+    classes=store.get(current)['schema']['classes'] if current else ()
+    if current:
+        with st.expander('Checkpoint đã có trên máy · gồm ST3D mới tải',expanded=True):
+            local_ensemble_ui.inventory_table(local_ensemble.discover(store,current,settings))
+            st.caption('Chọn để ghép tại bước 2 · Class & model → Ghép checkpoint local.')
+    model_library_ui(settings,classes)
 
 
 def navigate(name):
@@ -39,7 +56,10 @@ def navigate(name):
 
 
 def notice_error(error):
-    st.error(str(error))
+    if isinstance(error, BlockingIOError):
+        st.warning('Tài nguyên đang bận. Chờ thao tác hiện tại hoàn tất rồi thử lại; không cần tạo lại dự án.')
+        with st.expander('Chi tiết lỗi'):st.code(str(error))
+    else:st.error(str(error))
     st.caption('Kiểm tra đường dẫn và định dạng theo hướng dẫn ở cuối trang. Dữ liệu đã lưu được giữ nguyên.')
 
 
@@ -62,8 +82,11 @@ def overview():
         columns = st.columns(4)
         for col,label,value in zip(columns,['Loại dữ liệu','Class trong dự án','Vòng hoàn tất','Nhãn đang chọn'],[p['schema']['data_type'].upper(),len(p['schema']['classes']),f"{len(p['completed_rounds'])}/{p['max_rounds']}",p['selected_version'] or 'Chưa chọn']):
             col.metric(label,value)
-        st.button('Tiếp tục dự án →', on_click=navigate, args=('Huấn luyện nguồn',), type='primary')
-    st.info('Adaptation: chọn checkpoint A/B, xác nhận trục/đơn vị, kiểm tra adapter GPU rồi gửi vòng chạy. Final predict và bàn giao CVAT còn cần hoàn thiện.')
+        config_path=store.path(p['id'])/'adaptation.json';bound=read(config_path) if config_path.exists() else {}
+        next_step='So sánh phiên bản' if len(p['completed_rounds'])>=p['max_rounds'] and p['completed_rounds'] else 'Vòng adaptation' if len(bound.get('models',{}))==2 else 'Huấn luyện nguồn' if bound.get('model_selection') else 'Class & nguồn'
+        if local_ensemble.configuration(store,p['id']).get('enabled'):next_step='Vòng adaptation'
+        st.button('Tiếp tục dự án →', on_click=navigate, args=(next_step,), type='primary')
+    st.info('Chọn model và chạy adaptation hoặc ghép local. Khi đã chọn phiên bản, mở Xuất CVAT để chạy final predict, tạo media PCD và gửi task shape bằng thao tác riêng.')
 
 
 def dataset_page():
@@ -91,12 +114,11 @@ def class_page():
     rows=[]
     for name in p['schema']['classes']:
         row={'Class':name,'Source train':setup['source_counts']['train'].get(name,0),'Source validation':setup['source_counts']['validation'].get(name,0)}
-        for key in ('A','B'):
-            row['Model '+key]='Cần học' if name in setup['plan']['models'][key]['missing_classes'] else 'Đã hỗ trợ'
         rows.append(row)
     st.dataframe(rows,width='stretch',hide_index=True)
     st.caption('Vehicle không tự tách thành car/truck/bus. Khác tên hoặc khác định nghĩa chưa có mapping được xác minh sẽ được báo thiếu class.')
-    st.button('Xem kế hoạch model →',on_click=navigate,args=('Huấn luyện nguồn',),type='primary')
+    if local_ensemble_ui.choose(store,settings,p):return
+    selection_step(store,settings,p,setup)
 
 
 def source_page():
@@ -105,23 +127,29 @@ def source_page():
     if not p:return
     setup=setup_for_project(p)
     if not setup:return
+    if local_ensemble_ui.prepare(store,settings,p):return
+    if prepare_native_sources(store,settings,p,setup):return
+    if prepare_selected(store,settings,p):return
     plan=setup['plan'];required=[key for key,item in plan['models'].items() if item['pretrain_required']]
     bindings_path=store.path(p['id'])/'adaptation.json'
     bindings=read(bindings_path).get('models',{}) if bindings_path.exists() else {}
+    model_plan=read(bindings_path).get('model_selection',{}) if bindings_path.exists() else {}
+    if model_plan:
+        required=[key for key in required if model_plan.get(key,{}).get('kind')=='source']
     for column,key in zip(st.columns(2),('A','B')):
         with column:
             with st.container(border=True):
                 item=plan['models'][key]
-                st.subheader(key+' · '+('SECOND-IoU' if key=='A' else 'PV-RCNN'))
+                st.subheader(key+' · '+bindings.get(key,{}).get('architecture',('SECOND-IoU' if key=='A' else 'PV-RCNN')))
                 if key in bindings and item['pretrain_required']:
                     st.info('Đã chọn checkpoint trung gian cho adaptation')
                     st.caption('Run nguồn chưa hoàn tất. Có thể dùng checkpoint này để thử mà không bắt buộc train lại model này.')
-                elif item['pretrain_required']:
+                elif key in required:
                     st.info('Cần học: '+', '.join(item['missing_classes']))
                     st.caption('Head sẽ học class đã chọn, giữ lại weights phần còn tương thích. Các class cũ được chọn cũng có trong nhãn train để tránh quên.')
                 else:
                     st.success('Dùng checkpoint hiện có · bỏ qua pretrain')
-    blockers=plan['source_blockers']+list(plan['config_blockers'].values())
+    blockers=plan['source_blockers']+[reason for key,reason in plan['config_blockers'].items() if key in required]
     for reason in dict.fromkeys(blockers):st.warning(reason)
     selected_models=required
     if required:
@@ -132,7 +160,11 @@ def source_page():
             st.info('Chạy A → B: dừng sớm A sẽ chuyển sang B sau khi A dừng hẳn và GPU rảnh. A lỗi sẽ dừng chuỗi.')
     if not required:
         st.success('Cả hai detector đã hỗ trợ đủ nhãn bạn chọn. Không cần train nguồn lại.')
-        st.button('Tiếp tục adaptation →',on_click=navigate,args=('Vòng adaptation',),type='primary',disabled=bool(blockers))
+        if st.button('Tiếp tục adaptation →',type='primary',disabled=bool(blockers)):
+            if model_plan:
+                from annoloop.adaptation import save_model_selection
+                save_model_selection(store,p['id'],settings,model_plan)
+            st.session_state['pending_navigation']='Vòng adaptation';st.rerun()
     elif setup['launches']:
         receipt=setup['launches'][-1]
         if receipt['status'] in ('failed','dispatch_failed'):
@@ -218,13 +250,18 @@ def monitor():
 
 def rounds_page():
     p=current_project()
-    if p:adaptation_ui(store,settings,p)
+    if p:
+        if local_ensemble_ui.execution(store,settings,p):return
+        adaptation_ui(store,settings,p)
 
 
 def compare_page():
     hero('05 / SO SÁNH','Giữ vòng tốt, quay lại khi cần.', 'So sánh nhãn trên cùng frame sample. Vòng mới nhất và phiên bản đang chọn được hiển thị riêng để tránh dùng nhầm nhãn.')
     p=current_project()
     if not p:return
+    final_panel(store,p)
+    if local_ensemble_ui.results(store,settings,p) and not p['completed_rounds']:return
+    st.button('Tiếp tục: xuất sang CVAT →',on_click=navigate,args=('Xuất CVAT',),disabled=not p['selected_version'])
     saved_predictions(store,p)
     versions=p['completed_rounds']
     if not versions:
@@ -270,15 +307,10 @@ def compare_page():
 
 
 def cvat_page():
-    hero('06 / CVAT','Bàn giao đúng phiên bản nhãn.', 'Chọn shape cho box độc lập hoặc track cho đối tượng xuyên frame. Hai chế độ tạo task riêng, giữ rõ nguồn nhãn và frame mapping.')
+    hero('06 / CVAT','Bàn giao đúng phiên bản nhãn.', 'Final predict từ checkpoint đã chọn, chuẩn hóa point cloud và tạo task shape mới trên CVAT local.')
     p=current_project()
     if not p:return
-    st.metric('Phiên bản nhãn được chọn',p['selected_version'] or 'Chưa chọn')
-    mode=st.radio('Kiểu annotation',['Shape · box theo frame','Track · đối tượng theo chuỗi'],horizontal=True)
-    st.caption('Track cần timestamp và pose hoặc xác nhận sensor cố định. Nội suy chưa đủ bằng chứng chỉ là ignore / review.')
-    st.text_input('Địa chỉ CVAT local',value='http://localhost:8080')
-    st.warning('Chưa sẵn sàng bàn giao: final inference trên toàn bộ dataset, chuẩn hóa media và kết nối UI → exporter còn cần hoàn thiện. Snapshot adaptation chưa phải kết quả final cho toàn bộ dữ liệu.')
-    st.button('Tạo task CVAT',disabled=True,type='primary')
+    delivery_ui(store,settings,p)
     if p['selected_version']:
         version=p['selected_version'];path=store.path(p['id'])/'rounds'/version/'labels.json'
         st.download_button('Tải snapshot adaptation (.json)',path.read_bytes(),file_name=version+'_adaptation_labels.json',mime='application/json')
@@ -298,7 +330,7 @@ def help_page():
             st.subheader('Thiết bị & môi trường')
             st.caption('NVIDIA GPU · một worker tại một thời điểm')
             if st.button('Kiểm tra CUDA',type='primary'):
-                with st.spinner('Kiểm tra venv và CUDA…'):st.session_state['hardware']=probe(settings.trainer_python)
+                with st.spinner('Kiểm tra venv và CUDA…'):st.session_state['hardware']=probe(settings.python)
             if 'hardware' in st.session_state:
                 value=st.session_state['hardware']
                 (st.success if value.get('ready') else st.error)('CUDA sẵn sàng' if value.get('ready') else 'CUDA chưa sẵn sàng')
@@ -309,6 +341,16 @@ def help_page():
             st.caption('Nơi lưu dự án');st.code(str(settings.data),language=None)
             st.caption('Đổi bằng VINAI_PYTHON / ANNOLOOP_DATA_DIR trước khi mở app. Chưa có Docker trong bản này.')
 
+
+if clear_password := st.session_state.pop('clear_delivery_password',None):
+    st.session_state['delivery_password_'+clear_password]=''
+
+if folder := st.session_state.pop('pending_folder', None):
+    widget_key,folder_path=folder
+    if widget_key in ('quick_source','quick_target'):
+        st.session_state[widget_key]=folder_path
+        st.session_state.pop('quick_data',None)
+        st.session_state.pop('quick_signature',None)
 
 if next_page := st.session_state.pop('pending_navigation', None):
     st.session_state['navigation'] = next_page
@@ -323,11 +365,11 @@ with st.sidebar:
     st.write('')
     projects=sorted(store.list(),key=lambda p:p['created_at'],reverse=True)
     ids=[p['id'] for p in projects]
-    if st.session_state.get('project_id') not in ids:
+    if 'project_id' not in st.session_state or (st.session_state['project_id'] is not None and st.session_state['project_id'] not in ids):
         st.session_state['project_id']=ids[0] if ids else None
     labels={p['id']:p['name']+' · '+p['id'][:6] for p in projects}
-    st.selectbox('Dự án hiện tại',ids if ids else [None],key='project_id',
-                 format_func=lambda p:labels.get(p,'Chưa có dự án'))
+    st.selectbox('Dự án hiện tại',[None]+ids,key='project_id',on_change=select_project,
+                 format_func=lambda p:labels.get(p,'＋ Dự án mới (chưa lưu)'))
     if st.session_state['project_id']:
         selected_project=store.get(st.session_state['project_id'])
         inventory=read(store.path(selected_project['id'])/'dataset.json')
@@ -354,16 +396,27 @@ with st.sidebar:
                             SelectionPolicy(**dict(policy,mode=selection,min_agreement=agreement,min_supported_fraction=support)))
                         st.rerun()
                     except ValueError as error:st.error(str(error))
-    st.button('＋ Tạo dự án mới',on_click=navigate,args=('Dữ liệu',),width='stretch')
-    st.radio('Không gian làm việc',PAGES,key='navigation',label_visibility='collapsed')
+    st.button('＋ Tạo dự án mới',on_click=new_project,width='stretch')
+    st.caption('WORKFLOW DỰ ÁN')
+    stages=[('1 · Dữ liệu','Dữ liệu'),('2 · Class & model','Class & nguồn'),('3 · Chuẩn bị model','Huấn luyện nguồn'),('4 · Adaptation','Vòng adaptation'),('5 · Kết quả & so sánh','So sánh phiên bản'),('6 · Xuất CVAT','Xuất CVAT')]
+    for index,(label,target) in enumerate(stages):
+        selected=st.session_state['navigation']==target
+        st.button(label,key='workflow_nav_'+str(index),on_click=navigate,args=(target,),width='stretch',type='primary' if selected else 'secondary',disabled=index>0 and not st.session_state.get('project_id'))
+    with st.expander('Công cụ & hướng dẫn',expanded=False):
+        st.caption('Kho model là thư viện tham khảo. Chọn model của dự án ở bước 2.')
+        st.radio('Không gian làm việc',PAGES,key='navigation',label_visibility='collapsed')
     st.divider()
     st.caption('LOCAL WORKSPACE · MVP')
     st.caption('Source train có nhãn. Target adaptation không dùng gold. Mỗi phiên bản được lưu riêng.')
 
 page=st.session_state['navigation']
-st.caption('ANNOLOOP  /  '+page.upper())
+page_label={'Class & nguồn':'2 · CLASS & MODEL','Huấn luyện nguồn':'3 · CHUẨN BỊ MODEL','Dữ liệu':'1 · DỮ LIỆU','Vòng adaptation':'4 · ADAPTATION','So sánh phiên bản':'5 · KẾT QUẢ','Xuất CVAT':'6 · CVAT'}.get(page,page.upper())
+st.caption('ANNOLOOP  /  '+page_label)
+if st.session_state.get('project_id'):
+    visible_project=store.get(st.session_state['project_id'])
+    st.caption(f"Dự án: {visible_project['name']} · ID {visible_project['id']} · Phiên bản đang dùng: {visible_project['selected_version'] or 'chưa chọn'}")
 if message:=st.session_state.pop('flash',None):st.success(message)
 try:
-    dict(zip(PAGES,[overview,dataset_page,class_page,source_page,rounds_page,compare_page,cvat_page,help_page,inspection_page]))[page]()
+    dict(zip(PAGES,[overview,dataset_page,class_page,source_page,rounds_page,compare_page,cvat_page,help_page,inspection_page,model_library_page]))[page]()
 except Exception as error:
     notice_error(error)

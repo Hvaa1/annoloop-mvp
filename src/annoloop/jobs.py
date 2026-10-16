@@ -51,6 +51,16 @@ def start_pretrain(spec, settings=None):
     return str(root)
 
 
+def process_alive(root):
+    """Check PID identities only; monitoring must not parse models or training logs."""
+    path = Path(root) / 'training.json'
+    receipt = read(path) if path.exists() else {}
+    return any(receipt.get(identity) is not None
+               and process_identity(receipt.get(key)) == receipt[identity]
+               for key, identity in (("pid", "process_start"), ("trainer_pid", "trainer_process_start"))
+               if receipt.get(key))
+
+
 def status(root):
     root = Path(root)
     receipt = read(root / "training.json") if (root / "training.json").exists() else {}

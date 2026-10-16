@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "repositories": [
+    {
+      "name": "ST3D/ST3D++",
+      "url": "https://github.com/CVMI-Lab/ST3D",
+      "status": "reference; unpinned external checkpoints require separate import verification"
+    },
+    {
+      "name": "3DOD-LSF",
+      "url": "https://github.com/Tiffamy/3DOD-LSF",
+      "status": "two pinned archive members supported"
+    }
+  ],
+  "models": [
+    {
+      "id": "lsf-secondiou-waymo-source",
+      "name": "3DOD-LSF · SECONDNetIoU · Waymo source-only",
+      "architecture": "SECONDNetIoU",
+      "classes": [
+        "Vehicle"
+      ],
+      "features": [
+        "x",
+        "y",
+        "z"
+      ],
+      "source_url": "https://github.com/Tiffamy/3DOD-LSF",
+      "archive_url": "https://drive.google.com/file/d/1dE-uBtGcD8EpoYxd1vOCFe6WC1GaIm3x/view",
+      "drive_id": "1dE-uBtGcD8EpoYxd1vOCFe6WC1GaIm3x",
+      "member": "ckpt/waymo_nus/source_only/secondiou.pth",
+      "bytes": 143136532,
+      "sha256": "9dcc0b92402618e9e9c8f795618336fcbc7006b75aae2066ee86c767a2adabfa",
+      "availability": "known_local_payload_remote_not_rechecked",
+      "class_evidence": "Previously inspected source config/head and pinned local payload hash; Vehicle is not an automatic car mapping.",
+      "source_dataset": "Waymo",
+      "adaptation_status": "source_only",
+      "profile": "lsf-secondiou-waymo-source.yaml",
+      "profile_sha256": "75897b2c93e7151ba5c73439e7545a5f695bf876ebd9151ba7fdeedf9c4cbca9",
+      "profile_evidence": {
+        "repository": "https://github.com/CVMI-Lab/ST3D",
+        "revision": "8100ff44a7a7c4e7087363eec101831b343a99b7",
+        "path": "tools/cfgs/da-waymo-nus_models/secondiou/secondiou.yaml",
+        "original_sha256": "f6a830a0f481b678210a743b97b78eec5b9d4743b312bf006869a882f8c0a8c1"
+      }
+    },
+    {
+      "id": "lsf-pvrcnn-waymo-source",
+      "name": "3DOD-LSF · PVRCNN · Waymo source-only",
+      "architecture": "PVRCNN",
+      "classes": [
+        "Vehicle"
+      ],
+      "features": [
+        "x",
+        "y",
+        "z"
+      ],
+      "source_url": "https://github.com/Tiffamy/3DOD-LSF",
+      "archive_url": "https://drive.google.com/file/d/1dE-uBtGcD8EpoYxd1vOCFe6WC1GaIm3x/view",
+      "drive_id": "1dE-uBtGcD8EpoYxd1vOCFe6WC1GaIm3x",
+      "member": "ckpt/waymo_nus/source_only/pvrcnn.pth",
+      "bytes": 156707463,
+      "sha256": "5a005e2cd7c60d3dadd8429080d42eeae7927775f4eff6a7bb2c80d14eeffe73",
+      "availability": "known_local_payload_remote_not_rechecked",
+      "class_evidence": "Previously inspected source config/head and pinned local payload hash; Vehicle is not an automatic car mapping.",
+      "source_dataset": "Waymo",
+      "adaptation_status": "source_only",
+      "profile": "lsf-pvrcnn-waymo-source.yaml",
+      "profile_sha256": "6488b72feda85c0ecc164828395c6484811326d1e8c540645870173569c29aeb",
+      "profile_evidence": {
+        "repository": "https://github.com/CVMI-Lab/ST3D",
+        "revision": "8100ff44a7a7c4e7087363eec101831b343a99b7",
+        "path": "tools/cfgs/da-waymo-nus_models/pvrcnn/pvrcnn.yaml",
+        "original_sha256": "c32611fef9bb19f18b762016854d6ab89270e93c7d2174b8948efce31157f334"
+      }
+    }
+  ]
+}

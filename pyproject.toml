@@ -17,6 +17,10 @@ pcd = ["pypcd4>=1.1,<2"]
 
 [project.scripts]
 annoloop = "annoloop.cli:main"
+annoloop-connect-model = "annoloop.connect_model:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+annoloop = ["catalog/*.json", "catalog/*.yaml", "catalog/*.txt"]

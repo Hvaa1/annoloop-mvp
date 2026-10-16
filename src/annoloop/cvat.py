@@ -10,6 +10,35 @@ from .schema import ClassSchema
 ATTRIBUTES = {"origin": "detector", "training_policy": "positive", "review_status": "unreviewed"}
 
 
+def check_login(host, username, password):
+    """Explicit authentication + users/self only; no task/export required.
+
+    Return no password, cookie or token, and do not expose SDK response bodies
+    in error messages. The caller may keep the non-secret receipt in UI memory.
+    """
+    from urllib.parse import urlparse
+    from .io import now
+    host=host.strip().rstrip('/');username=username.strip()
+    parsed=urlparse(host)
+    if parsed.scheme not in ('http','https') or not parsed.netloc or parsed.username or parsed.password:
+        raise ValueError('Địa chỉ CVAT cần http/https, tài khoản và mật khẩu nhập riêng')
+    if not username or not password:
+        raise ValueError('Nhập tài khoản và mật khẩu CVAT trước khi kiểm tra')
+    from cvat_sdk import make_client
+    try:
+        with make_client(host,credentials=(username,password)) as client:
+            account=client.users.retrieve_current_user()
+            result=dict(host=host,username=account.username,user_id=account.id,checked_at=now())
+    except Exception as error:
+        status=getattr(error,'status',None)
+        if status in (400,401,403):
+            raise ValueError(f'CVAT từ chối đăng nhập (HTTP {status}). Kiểm tra tài khoản, mật khẩu và địa chỉ server.') from None
+        if status:
+            raise ValueError(f'Không xác minh được tài khoản CVAT (HTTP {status}).') from None
+        raise ValueError('Không kiểm tra được kết nối CVAT ('+type(error).__name__+').') from None
+    return result
+
+
 def label_specs(schema):
     return [dict(name=name, type="cuboid" if schema.data_type == "3d" else "rectangle",
                  attributes=[dict(name=key, input_type="text", mutable=True, default_value=value, values=[])

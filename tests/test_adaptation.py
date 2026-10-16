@@ -218,10 +218,15 @@ class NativeAdaptationTests(unittest.TestCase):
         job = self.store.path(self.pid) / 'adaptation_jobs/old'
         write(job / 'state.json', dict(status='running', pid=100, process_start='old-controller'))
         run = self.store.path(self.pid) / 'work/M1/attempts/try1/A'
-        write(run / 'training.json', dict(status='running'))
+        write(run / 'training.json', dict(status='running', trainer_pid=123, trainer_process_start='real-trainer'))
         with patch('annoloop.adaptation.process_identity', return_value=None), \
-             patch('annoloop.jobs.status', return_value=dict(process_alive=True)):
+             patch('annoloop.jobs.process_identity', return_value='real-trainer'), \
+             patch('annoloop.jobs.model_identity', side_effect=AssertionError('Liveness must not parse YAML')), \
+             patch('annoloop.jobs.read_log', side_effect=AssertionError('Liveness must not read logs')):
             self.assertEqual(adaptation.job_status(job)['status'], 'orphaned_worker')
+        with patch('annoloop.adaptation.process_identity', return_value=None), \
+             patch('annoloop.jobs.process_identity', return_value='different-start'):
+            self.assertFalse(adaptation.job_status(job)['process_alive'])
 
     def test_multiclass_signed_ids_are_preserved_and_gold_is_rejected(self):
         boxes = [dict(id='a', class_name='pedestrian', box=[1., 0., 0., 1., 1., 2., 0.], score=.8, training_policy='positive')]

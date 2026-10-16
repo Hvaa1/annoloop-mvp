@@ -51,11 +51,16 @@ def model_choices(store, pid, settings):
             if arch == expected:
                 available[key].append(dict(candidate, architecture=arch))
                 seen.add(candidate['path'])
+    from .hub_selection import candidates as hub_candidates
+    for candidate in hub_candidates(settings.data,classes):
+        for key in available:
+            if not any(c['path']==candidate['path'] for c in available[key]):
+                available[key].append(dict(candidate))
     return available
 
 
 def save_setup(store, pid, settings, selected, coordinates_confirmed, bin_columns=4,
-               epochs=1, learning_rate=.0001, source_weight=.5, adaptation_classes=None, memory_policy=None):
+               epochs=1, learning_rate=.0001, source_weight=.5, adaptation_classes=None, memory_policy=None, model_selection=None):
     if type(epochs) is not int or epochs < 1 or not 0 < learning_rate <= .01 or not 0 < source_weight <= 1:
         raise ValueError('Epoch/LR/source weight không hợp lệ')
     if bin_columns not in (3, 4, 5):
@@ -73,16 +78,25 @@ def save_setup(store, pid, settings, selected, coordinates_confirmed, bin_column
     for key in ARCHITECTURES:
         candidate = next((c for c in choices[key] if c['path'] == selected.get(key)), None)
         if candidate:
+            if candidate.get('backend')=='registry_framework':
+                from .hub_selection import validate_cache
+                validate_cache(settings.data,candidate)
             models[key] = dict(candidate, checkpoint_sha256=digest(candidate['path']),
                                config_sha256=digest(candidate['config']))
+        elif selected.get(key):
+            raise ValueError('Model '+key+' không còn trong danh sách; chọn lại checkpoint')
     document = dict(models=models, coordinates_confirmed=bool(coordinates_confirmed),
                     bin_columns=bin_columns, epochs=epochs, learning_rate=learning_rate,
                     source_weight=source_weight, adaptation_classes=chosen, tracking_mode='off',
                     memory_policy=memory, saved_at=now())
     with lock(store.path(pid) / '.adaptation_dispatch.lock'):
-        if active_job(store, pid):
+        if execution_busy(store, pid):
             raise ValueError('Chờ adaptation/check GPU hiện tại dừng trước khi sửa cấu hình')
         old_path = store.path(pid) / 'adaptation.json'
+        if model_selection is not None:
+            document['model_selection']=model_selection
+        elif old_path.exists() and 'model_selection' in read(old_path):
+            document['model_selection']=read(old_path)['model_selection']
         if store.get(pid)['completed_rounds'] and old_path.exists():
             old = read(old_path)
             if any(old.get(k) != document.get(k) for k in ('models', 'coordinates_confirmed', 'bin_columns')):
@@ -93,14 +107,80 @@ def save_setup(store, pid, settings, selected, coordinates_confirmed, bin_column
     return document
 
 
+def save_model_selection(store,pid,settings,selection):
+    """One durable model selection for choose/prepare/adapt; no download or worker."""
+    if set(selection)!={'A','B'}:raise ValueError('Chọn model cho cả A và B')
+    from .model_hub import load_catalog,model_root
+    registry={m['id']:m for m in load_catalog()['models']}
+    choices=model_choices(store,pid,settings);paths={}
+    for key,value in selection.items():
+        if value['kind']=='hub':
+            if value['id'] not in registry:raise ValueError('Model không còn trong danh mục')
+            path=str(model_root(settings.data,value['id'])/'weights.pth')
+            paths[key]=path if any(c['path']==path for c in choices[key]) else None
+        elif value['kind']=='local':
+            if not any(c['path']==value['path'] and c.get('backend','native_st3d')=='native_st3d' for c in choices[key]):
+                raise ValueError('Checkpoint local không còn hợp lệ')
+            paths[key]=value['path']
+        elif value['kind']=='source':
+            setup=read(store.path(pid)/'setup.json')
+            native=[c for c in choices[key] if c.get('backend','native_st3d')=='native_st3d']
+            if value.get('source_id'):
+                from .native_sources import entry
+                source=entry(value['source_id'])
+                if source['architecture']!=ARCHITECTURES[key]:raise ValueError('Native source không đúng vai trò '+key)
+                bound=setup.get('native_source_bindings',{}).get(key,{})
+                if bound.get('id')!=source['id']:
+                    paths[key]=None;continue
+                # Only checkpoints descended from the chosen initializer may
+                # satisfy this intent. Never pick an unrelated old project run.
+                matching=[]
+                for candidate in native:
+                    run=candidate.get('origin_run');job=Path(run)/'job.json' if run else None
+                    if job and job.is_file():
+                        ref=read(job)['spec'].get('checkpoint_metadata')
+                        if ref and checkpoint_origin(ref,source):matching.append(candidate)
+                    elif candidate['path']==models_path(setup,key) and checkpoint_origin(setup['model_metadata'][key],source):
+                        matching.append(candidate)
+                native=matching
+            if native:
+                import re
+                latest_run=native[0].get('origin_run')
+                pool=[c for c in native if c.get('origin_run')==latest_run]
+                pick=max(pool,key=lambda c:int(re.search(r'epoch_(\d+)',Path(c['path']).stem)[1]) if re.search(r'epoch_(\d+)',Path(c['path']).stem) else 0)
+                paths[key]=pick['path']
+            elif setup['plan']['models'][key]['pretrain_required']:paths[key]=None
+            else:raise ValueError('Chưa có checkpoint nguồn cho model '+key)
+        else:raise ValueError('Nguồn model không hợp lệ')
+    old_path=store.path(pid)/'adaptation.json';old=read(old_path) if old_path.exists() else {}
+    previous=old.get('model_selection') or {k:(dict(kind='hub',id=m['model_id']) if m.get('backend')=='registry_framework' else dict(kind='local',path=m['path'])) for k,m in old.get('models',{}).items()}
+    if store.get(pid)['completed_rounds'] and previous!=selection:
+        raise ValueError('Dự án đã có vòng hoàn tất; tạo dự án mới để đổi model gốc')
+    return save_setup(store,pid,settings,paths,old.get('coordinates_confirmed',False),
+        old.get('bin_columns',4),old.get('epochs',1),old.get('learning_rate',.0001),old.get('source_weight',.5),
+        old.get('adaptation_classes'),old.get('memory_policy'),model_selection=selection)
+
+
+def models_path(setup,key):
+    path=setup.get('model_metadata',{}).get(key)
+    return read(path).get('checkpoint') if path else None
+
+
+def checkpoint_origin(path,source):
+    from .compatibility import checkpoint_metadata
+    metadata=checkpoint_metadata(path)
+    return (metadata.get('native_source_id')==source['id'] and metadata['checkpoint_sha256']==source['sha256']
+            or metadata.get('transfer',{}).get('initial_checkpoint_sha256')==source['sha256'])
+
+
 def job_status(root):
     root = Path(root)
     state = read(root / 'state.json')
     alive = bool(state.get('process_start') and process_identity(state.get('pid')) == state['process_start'])
     children = [read(p) for p in root.glob('**/*.process.json')]
     children_alive = any(c.get('process_start') and process_identity(c.get('pid')) == c['process_start'] for c in children)
-    from .jobs import status
-    children_alive = children_alive or any(status(p.parent)['process_alive']
+    from .jobs import process_alive
+    children_alive = children_alive or any(process_alive(p.parent)
                     for p in (root.parents[1] / 'work').glob('M*/**/[AB]/training.json'))
     if not alive and children_alive:
         state = dict(state, status='orphaned_worker', error='Controller đã dừng nhưng worker còn sống; cần ngắt worker trước khi chạy lại')
@@ -114,6 +194,13 @@ def active_job(store, pid):
         if job_status(path.parent)['process_alive']:
             return str(path.parent)
     return None
+
+
+def execution_busy(store,pid):
+    """Guard configuration/dispatch without changing A/B monitor's job contract."""
+    from .local_ensemble import active as ensemble_active
+    from .final_delivery import active as delivery_active
+    return bool(active_job(store,pid) or ensemble_active(store,pid) or delivery_active(store,pid))
 
 
 def stop_job(root):
@@ -190,13 +277,21 @@ def readiness(store, pid):
     path = root / 'adaptation.json'
     config = read(path) if path.exists() else dict(models={}, coordinates_confirmed=False)
     blockers = []
+    non_native = False
     if project['schema']['data_type'] != '3d':
         blockers.append('Detector 2D chưa có adapter')
     for key, arch in ARCHITECTURES.items():
         model = config['models'].get(key)
         if not model:
-            blockers.append(f'Detector {key}: chọn checkpoint {arch} hỗ trợ ' + ', '.join(project['schema']['classes']))
+            if config.get('model_selection',{}).get(key,{}).get('kind')=='hub':
+                blockers.append(f'Model {key}: đã chọn từ danh mục, cần hoàn tất bước Chuẩn bị model rồi cập nhật binding')
+            else:
+                blockers.append(f'Detector {key}: chọn checkpoint tại bước Class & model hỗ trợ ' + ', '.join(project['schema']['classes']))
         else:
+            from .hub_selection import blockers as hub_blockers
+            reasons=hub_blockers(model,config.get('adaptation_classes',project['schema']['classes']))
+            non_native=non_native or bool(reasons)
+            blockers.extend(f'Detector {key}: '+reason for reason in reasons)
             for field, hash_key in (('path', 'checkpoint_sha256'), ('config', 'config_sha256')):
                 if not Path(model[field]).is_file() or digest(model[field]) != model[hash_key]:
                     blockers.append(f'Detector {key}: checkpoint/config đã thay đổi, chọn lại')
@@ -214,7 +309,7 @@ def readiness(store, pid):
         blockers.append('Source infos train/validation thiếu hoặc đã thay đổi; chuẩn bị lại nguồn')
     expected = {key: {k: value[k] for k in ('checkpoint_sha256', 'config_sha256', 'runtime')}
                 for key, value in config['models'].items()}
-    gpu_verified = bool(verified.get('models') == expected and len(expected) == 2
+    gpu_verified = bool(not non_native and verified.get('models') == expected and len(expected) == 2
                         and verified.get('source_evidence') == source_evidence and source_valid
                         and verified.get('point_contract') == dict(dataset_sha256=project['dataset_sha256'],
                             bin_columns=config.get('bin_columns'), coordinates_confirmed=config.get('coordinates_confirmed'))
@@ -222,7 +317,7 @@ def readiness(store, pid):
     if not gpu_verified:
         blockers.append('Chạy kiểm tra adapter GPU A → B trước khi train adaptation')
     can_check = not [b for b in blockers if not b.startswith('Chạy kiểm tra')]
-    reports = calibration_reports(store, pid, config['models'], source_evidence)
+    reports = calibration_reports(store, pid, {k:m for k,m in config['models'].items() if m.get('backend','native_st3d')=='native_st3d'}, source_evidence)
     for key, report in reports.items():
         for row in report['classes']:
             if not row['enough_samples']:
@@ -244,7 +339,7 @@ def start_job(store, pid, settings, mode='run', retry=False, resume_from=None):
         raise ValueError('Tiếp tục và bắt đầu lại là hai thao tác riêng')
     root = store.path(pid)
     with lock(root / '.adaptation_dispatch.lock'):
-        if active_job(store, pid):
+        if execution_busy(store, pid):
             raise ValueError('Job hiện tại còn sống; không khởi chạy lại')
         check = readiness(store, pid)
         if not (check['ready'] if mode == 'run' else check['can_check']):

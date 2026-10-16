@@ -39,6 +39,12 @@ def digest(path):
     return result.hexdigest()
 
 
+def file_signature(path):
+    """Cheap invalidation identity; callers still hash before sensitive actions."""
+    stat=Path(path).stat()
+    return (stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns,stat.st_ctime_ns)
+
+
 def inside(root, relative):
     root = Path(root).resolve()
     path = (root / relative).resolve()

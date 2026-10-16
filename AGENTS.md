@@ -23,8 +23,15 @@ ANNOLOOP_* overrides. Never depend on the parent VIN_Ai workspace/demo.
 - Memory IDs are independent of temporal track IDs. Preserve checkpoint evidence,
   context/hash binding, expiry/conflict rules, rollback and resume validation.
 - Native training is source-assisted co-training, not a full ST3D++ reproduction.
-- Final CVAT UI, tracking adaptation and 2D detector actions remain disabled until
-  concretely implemented/tested. Do not present design mockups as measured output.
+- Final CVAT UI now supports explicit final inference/export/shape task creation;
+  read docs/FINAL_DELIVERY.md. No upload or authentication on refresh. Credentials
+  stay in memory. Keep cached read-only previews separate from full upload hash
+  verification. Tracking adaptation and 2D detectors remain unsupported.
+- Keep the six workflow steps and version comparison/selection/rollback. Result
+  filters display ignore boxes without promoting them into training or export.
+  See docs/UI_PERFORMANCE.md; keep live PID identity and partial-frame checks.
+- Local checkpoint ensemble is inference-only; generic raw adapter binding does
+  not grant native train/calibration readiness. No implicit download on page view.
 - Do not commit user data: data/, datasets/, databases, weights, point clouds,
   labels, logs, credentials or compiled artifacts. Respect .gitignore and audit
   git's actual staged files before push, including files under unexpected names.

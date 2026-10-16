@@ -36,3 +36,14 @@ button[kind="primary"] {background:var(--purple);border-color:var(--purple);}
 @media(max-width:750px){.block-container{padding:1rem;}.hero{padding:20px;}.hero h2{font-size:1.4rem;}}
 
 [data-testid="stAppDeployButton"] {display:none;}
+
+/* Readable controls and keyboard focus without transitions or extra scripts. */
+.stButton button:focus-visible,.stDownloadButton button:focus-visible,
+.stFormSubmitButton button:focus-visible {outline:3px solid #b8a6f0;outline-offset:3px;}
+[data-testid="stSidebar"] .stButton button {text-align:left;justify-content:flex-start;}
+[data-testid="stDataFrame"] {border-radius:10px;overflow:hidden;}
+@media(max-width:750px){
+  .block-container{padding-top:3.5rem;}
+  [data-testid="stMetric"]{padding:12px;}
+  .stButton button,.stFormSubmitButton button{min-height:44px;}
+}

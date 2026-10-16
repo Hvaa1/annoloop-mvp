@@ -53,9 +53,11 @@ Chế độ này chỉ mở giao diện; predict/train vẫn cần GPU profile. 
 - Số vòng tùy chọn, chạy thủ công/tự động, chọn nhãn bằng tay/theo ngưỡng, dừng sớm và rollback.
 - Checkpoint mỗi **10 epoch + epoch cuối thành công**; giữ log/checkpoint khi ngắt và tiếp tục từ artifacts hợp lệ.
 - Sample point cloud/box trước và sau từng M; xem kết quả đã lưu không chạy lại model.
-- Backend đóng gói annotation shape/track riêng và API CVAT.
+- Kho model, kiểm tra class/adapter và nhánh ghép checkpoint local inference tuần tự.
+- Final inference theo phiên bản đã chọn, viewer accepted/ignore và tạo task shape trên CVAT bằng thao tác rõ ràng.
+- Sáu bước điều hướng, giữ so sánh phiên bản/rollback và cache đường đọc dữ liệu. Xem [tối ưu UI/backend](docs/UI_PERFORMANCE.md).
 
-**Giới hạn hiện tại:** UI bàn giao CVAT vẫn khóa vì final inference toàn tập và nối exporter chưa hoàn thiện. Adaptation UI hiện dùng nhãn không tracking; tracking cần thêm sequence/timestamp/ego pose và nối đầy đủ. 2D có schema/export contract nhưng chưa có detector/trainer. Đây là co-training có source loss và bộ nhớ nhãn, chưa phải bản tái hiện đầy đủ ST3D++ (DSNorm/EMA/curriculum còn thiếu). Các proxy agreement/confidence không thay thế đánh giá accuracy/recall.
+**Giới hạn hiện tại:** Final delivery UI hỗ trợ shape; xem [hướng dẫn bàn giao](docs/FINAL_DELIVERY.md). Adaptation UI hiện dùng nhãn không tracking; tracking cần thêm sequence/timestamp/ego pose và nối đầy đủ. Nhánh ghép nhiều checkpoint chỉ inference, chưa train N model. Model tải được chưa có nghĩa adapter đủ train/calibration; các cổng kiểm tra tương thích vẫn áp dụng. 2D có schema/export contract nhưng chưa có detector/trainer. Đây là co-training có source loss và bộ nhớ nhãn, chưa phải bản tái hiện đầy đủ ST3D++ (DSNorm/EMA/curriculum còn thiếu). Các proxy agreement/confidence không thay thế đánh giá accuracy/recall.
 
 Gold target chỉ dùng đánh giá cuối, không dùng để chọn pseudo-label hoặc train target.
 

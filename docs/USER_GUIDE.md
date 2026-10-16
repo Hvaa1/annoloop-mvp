@@ -6,28 +6,98 @@
 bash scripts/start_ui.sh
 ```
 
-Mở **http://localhost:8502**. Cài trước bằng `bash scripts/setup.sh --gpu`.
-UI dùng `.venv`, worker GPU dùng `.venv-gpu`; mã runtime nằm trong `vendor/ST3D`.
-Không chạy `app.py` trực tiếp bằng python. Đổi cổng bằng `ANNOLOOP_PORT=8503`.
-Xem [cài đặt trên máy mới](INSTALL.md).
+Mở **http://localhost:8502**. UI dùng `.venv` của checkout. Worker GPU dùng venv riêng tương thích với model; trên
+profile mặc định là `.venv-gpu` với Torch 2.0/CUDA 11.8 và các extension đã build. Không chạy `app.py`
+trực tiếp bằng python. Đổi cổng bằng `ANNOLOOP_PORT=8503` nếu cần.
 
-## Chỉ cần chọn folder và nhãn
+## Một workflow, chọn model một lần
 
-1. Mở **Dữ liệu**. Bấm **📂 Chọn** để duyệt folder source và target,
+Sidebar có 6 bước: **Dữ liệu → Class & model → Chuẩn bị model → Adaptation →
+Kết quả & so sánh → Xuất CVAT**. Tên, ID dự án và phiên bản đang dùng hiện trên
+trang để kiểm tra trước khi thao tác.
+
+Ở **Kết quả & so sánh**, có thể xem gói final đã lưu, lọc class và chọn box được
+giữ/ignore. Box tím là nhãn được giữ; box vàng nét đứt là ignore, kèm lý do và
+score khi rê chuột. Đây là bộ lọc xem, không thay đổi nhãn train hay nhãn xuất
+CVAT. So sánh trước/sau, chọn phiên bản và quay lại vòng cũ vẫn ở trang này.
+Frame chưa predict được ghi rõ; số box dự đoán không phải độ chính xác.
+
+Lần mở gói CVAT đầu tiên cần kiểm tra hash media. Các tương tác tiếp theo dùng
+cache khi file không thay đổi; bấm upload vẫn kiểm tra đầy đủ. Không có model
+nào tự chạy khi mở trang hoặc đổi bộ lọc.
+
+Ngoài A/B, bước **2 · Class & model → Ghép checkpoint local** cho chọn nhiều
+checkpoint hiện có, rồi chạy inference tuần tự ở bước 4 và xem sample ở bước 5.
+Bảng hiện cả bốn checkpoint ST3D mới tải cùng lý do chưa tương thích. Luồng ghép
+chưa train nhiều detector qua các vòng; xem [hướng dẫn ghép local](LOCAL_ENSEMBLE.md).
+
+1. Bấm **＋ Tạo dự án mới** ở sidebar. Form mới sẽ tách khỏi dự án đang xem;
+   dự án cũ và các lượt chạy được giữ nguyên. Nhập **Tên dự án mới**.
+   Bấm **📂 Chọn** để duyệt folder source và target,
    hoặc dán đường dẫn nếu đã biết. Folder nằm trên máy chạy AnnoLoop.
 2. Bấm **Đọc hai thư mục**. Tool đọc nhãn source, train/validation,
    media target và class schema nếu target đã có.
 3. Chọn **nhãn cần gán**. Target chưa có schema vẫn dùng được: chọn từ class
    nguồn hoặc nhập tên class cần có. Đây là yêu cầu của bạn, không phải nhãn gold.
-4. Chọn checkpoint A/B đã nhập hoặc “Không có checkpoint · học mới”. App tự lấy
-   metadata theo checkpoint; không yêu cầu bạn nhập JSON.
-5. Bấm **Tạo dự án và tự chuẩn bị**. Tool tự lưu schema, inventory, YAML và
-   job spec trong `data/projects/<id>/generated/`. Không ghi đè dataset gốc.
+4. Bấm **Lưu dữ liệu & chọn model →**. Tool tự tạo schema/inventory trong dự án,
+   không ghi đè dataset gốc. Ở bước **2 · Class & model**, chọn A/B từ checkpoint
+   local hoặc danh mục trực tuyến rồi bấm **Xác nhận model & tiếp tục →**.
+5. Bước **3 · Chuẩn bị model** dùng đúng lựa chọn đó: local hợp lệ thì dùng lại;
+   model chưa tải chỉ tải khi bạn bấm nút; model thiếu class mới học nguồn khi
+   source đủ nhãn. Model thiếu adapter train được báo riêng, không ép pretrain.
+6. Bước **4 · Adaptation** chỉ hiện model đã chọn, xác nhận XYZ/mét, kiểm tra GPU
+   và cấu hình các vòng. Không chọn model lại ở trang này.
+7. Bước **5 · Kết quả & CVAT** xem sample/so vòng, chọn phiên bản và chuyển sang
+   **Xuất CVAT**. Chọn phạm vi, bấm final predict để tạo media PCD và nhãn shape;
+   sau đó nhập thông tin CVAT local và bấm tạo task. Không tự upload khi final
+   predict hoàn tất. Xem [hướng dẫn bàn giao](FINAL_DELIVERY.md).
+
+Sidebar mặc định chỉ có năm bước trên; **Công cụ & hướng dẫn** chứa Kho model,
+kiểm tra model và các trang kỹ thuật. Model A/B là vai trò, không cố định tên
+kiến trúc. Lựa chọn được lưu chung trong `adaptation.json` và dùng xuyên suốt,
+kể cả khi bạn đóng/mở lại app. Dự án đã có vòng hoàn tất giữ model gốc để bảo
+toàn lịch sử; đổi model gốc cần dự án mới.
+
+Khi chưa lưu dự án mới, sidebar hiện **＋ Dự án mới (chưa lưu)** và khóa các
+bước cần dự án. Bạn có thể chọn lại dự án cũ trong **Dự án hiện tại** để quay
+về tổng quan. Bước dữ liệu không tự chọn checkpoint local; bình thường hãy
+để **Chưa chỉ định** và chọn model ở bước 2 sau khi lưu.
 
 Tùy chọn nâng cao nằm trong expander: số vòng, thủ công/tự động,
 chọn phiên bản bằng tay/theo ngưỡng và epoch/ROS khi cần học class mới.
 
 ## Khi nào cần train nguồn?
+
+### Lọc model trước khi tải
+
+Ở **Class & model**, bộ lọc **Chỉ hiện model phù hợp cho adaptation** mặc định bật.
+Tool kiểm tra class của checkpoint, nhãn trong source train/validation, feature
+đầu vào và backend train/calibration/ignore. Nó đọc header tối đa 16 frame rải
+đều trên target, hiển thị số mẫu đã đọc; không đọc nhãn target hay chạy detector.
+
+Ví dụ: PCD có `x, y, z, rgb` dùng được cho model XYZ; `rgb` không thay được cho
+`intensity`. Model cần nhiều sweep bị loại khi chưa có manifest được adapter hỗ
+trợ. BIN/NPY nhiều cột mà chưa khai báo ý nghĩa cột sẽ hiện chưa xác minh.
+
+Mở **model chưa phù hợp · xem lý do** để biết checkpoint bị loại vì sao. Yêu cầu
+đầu vào chưa có bằng chứng sẽ hiện **chưa xác minh**, không tự đoán theo tên model.
+Hiện contract đầu vào registry mới được ghi rõ cho hai gói SECOND KITTI và
+PointPillars nuScenes đã kiểm tra; các gói khác vẫn có thể chưa xác minh feature.
+Generic adapter chưa đầy đủ nên các gói registry hiện không qua lọc adaptation.
+
+Bỏ bộ lọc chỉ để xem/chọn gói chuẩn bị nghiên cứu; không mở quyền chạy adaptation.
+Ở trang chuẩn bị, lựa chọn không phù hợp bị khóa bước tiếp và chỉ hiện nút tải
+khi bạn xác nhận **Chỉ tải để nghiên cứu, không dùng chạy adaptation**. Lựa chọn
+cũ được giữ để sửa, không tự thay checkpoint hoặc xóa dữ liệu. Qua bộ lọc mới
+chỉ là ứng viên: vẫn cần kiểm tra GPU, axes/đơn vị và calibration trên dự án.
+
+### Chưa có checkpoint trên máy
+
+Chọn trực tiếp model chưa tải ở bước **Class & model**, rồi tải ở **Chuẩn bị model**.
+**Kho model** trong Công cụ là thư viện tham khảo, không phải nơi chọn model của dự án.
+Không giới hạn danh mục ở hai detector. Các gói có nguồn tải và class từ config,
+nhưng cần adapter tương thích mới dùng được trong adaptation. Xem
+[hướng dẫn Kho model](MODEL_HUB.md). Tải không khởi chạy trainer hoặc đổi model dự án.
 
 - Checkpoint hỗ trợ đủ class được chọn → **bỏ qua pretrain**, dùng trực tiếp.
 - Chỉ A hoặc B thiếu class → **chỉ train detector đó**.
@@ -54,7 +124,7 @@ có thể fine-tune trên pseudo-label target để thích nghi với dữ liệ
 `nuscenes` hoặc `v1.0-mini`; tool tự tìm loader root đúng, không nối version hai lần.
 JSON inventory được tạo tự động. Train/validation được kiểm tra trùng token;
 metadata `sample.json` có sẵn cho phép kiểm tra thêm trùng scene.
-Chuẩn bị nuScenes raw bằng `bash scripts/prepare_source.sh --input /path/raw --output /path/prepared --version v1.0-mini`. Source KITTI/Waymo/format tự tạo còn cần adapter.
+Source KITTI/Waymo/format tự tạo và tự chuẩn bị infos từ nuScenes raw còn cần adapter.
 
 **Target:** folder PCD/NPY/BIN cho 3D; nhận dạng ảnh PNG/JPG/JPEG cho 2D.
 Schema nếu có chỉ dùng để đề xuất nhãn. Khi bạn chọn nhãn, schema dự án được tạo
@@ -73,7 +143,7 @@ YAML đã được tool tạo từ profile tương ứng, không phải file do 
 Template có sẵn anchor car/pedestrian. Với class khác có nhãn và geometry
 trong source train, tool tự lấy kích thước trung vị để tạo anchor ban đầu;
 không lấy nhãn target để thiết kế anchor. Đây là cấu hình khởi đầu, cần đánh giá
-trên source validation. Thiếu geometry thì báo blocker, không tự bịa kích thước. Runtime ST3D mặc định là `vendor/ST3D`; quản trị viên
+trên source validation. Thiếu geometry thì báo blocker, không tự bịa kích thước. Runtime ST3D mặc định lấy từ workspace; quản trị viên
 có thể đổi `ANNOLOOP_ST3D_RUNTIME` khi chuyển máy.
 
 Sau khi job hoàn tất với receipt/checkpoint hợp lệ, app nhận checkpoint mới và
@@ -83,7 +153,7 @@ Checkpoint mỗi **10 epoch + epoch cuối**. Log, PID và checkpoint cập nh�
 không tự dừng trainer nền. Có thể dùng thêm:
 
 ```bash
-bash scripts/watch_train.sh
+bash buildphase/lidar_qa_demo/watch_train.sh
 ```
 
 Trước khi gửi trainer, app kiểm tra import dependency và các extension ST3D
@@ -91,7 +161,8 @@ bằng đúng Python worker. Có thể đổi `ANNOLOOP_WORKER_PYTHON` và
 `ANNOLOOP_RUNTIME_DEPS` khi chuyển máy. CUDA toolkit cho NVRTC có thể đổi bằng
 `ANNOLOOP_CUDA_TOOLKIT`; toolkit phải có `include/cuda/std/cassert`. Run lỗi có nút **Thử lại với môi trường
 đã sửa**: giữ toàn bộ run cũ, tạo output mới, không tự retry.
-CUDA available chưa bảo đảm mọi GPU kernel/model chạy đủ bộ nhớ. Kết quả kiểm tra GPU phụ thuộc môi trường và dự án của bạn; import thành công chưa chứng minh full model đủ bộ nhớ. Trên GPU cũ, biên dịch kernel NVRTC
+CUDA available chưa bảo đảm mọi GPU kernel/model chạy đủ bộ nhớ. Đã kiểm tra forward/backward nhỏ với spconv và cuDNN trên GPU; chưa chứng minh
+full source model đủ bộ nhớ/chạy hết epoch. Trên GPU cũ, biên dịch kernel NVRTC
 lần đầu có thể mất vài phút ở 0%; PID còn sống và log compile không phải lỗi.
 
 ## Sample, rollback và CVAT
@@ -118,6 +189,19 @@ Native adaptation GPU adapter đã nối với UI, có bước kiểm tra trư�
 chạy. Final inference/CVAT còn cần nối nên nút tạo task CVAT vẫn khóa.
 Snapshot adaptation tải xuống là JSON nội bộ, không phải gói import CVAT.
 Shape và track sẽ bàn giao thành task riêng sau bước final predict toàn dataset.
+
+## Tài nguyên trên máy hiện tại
+
+Source: `buildphase/lidar_qa_demo/resources/nuscenes`
+
+Target Day14: `Day14/K4-L2L3-Day14-Robotaxi-Tracking-Fusion-Student/outputs/Day14-J01-with-media`
+
+Checkpoint Waymo hiện có class Vehicle: chọn car/pedestrian sẽ hiển thị cần học.
+Muốn bỏ pretrain, chọn checkpoint đã hỗ trợ chính xác car/pedestrian.
+Không sửa schema/weights của dự án đang chạy để vượt kiểm tra.
+
+Dữ liệu được lưu ngoài source code, không push dataset, weights, log hoặc mật khẩu.
+Docker chưa tạo. UI/backend tách module; `ANNOLOOP_DATA_DIR` đổi nơi lưu project.
 
 ## Kiểm tra model đã dừng train
 
@@ -198,6 +282,10 @@ không được đưa vào danh sách tiếp tục.
 checkpoint khởi tạo hoặc phiên bản đang chọn. Dùng nút này khi muốn bắt đầu lại.
 Các lượt legacy chưa có cấu trúc attempts vẫn được xem và giữ nguyên artifacts.
 
+Ví dụ lượt `fb09f628…`: A/B train xong 3 epoch, A predict198/B12. Người dùng đã
+tiếp tục lượt này để predict186 frame B còn thiếu và hoàn tất M1, giữ checkpoints.
+Lượt `ebacbae9…` chỉ hoàn tất A; B chưa có checkpoint target nên nếu khôi phục
+lượt đó thì phải train lại riêng B.
 
 Nếu chọn nhãn tự động mà vẫn phải duyệt, xem thông báo **M… không được tự động
 chọn** và bảng **Kết quả chọn nhãn và ngưỡng** ở Vòng adaptation hoặc So sánh
