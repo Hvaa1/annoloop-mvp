@@ -19,7 +19,8 @@ chỉ kiểm chứng orchestration/receipt; không kiểm chứng model quality.
 Đã kiểm tra: class theo schema, no hardcoded car; broad mapping bị chặn;
 class source thực trong infos; holdout theo sequence; immutable snapshots và
 checkpoint copies; source-only calibration; không match khác class; ignore
-khi quality/confidence tradeoff; tracking per class; shape/track riêng; final
+khi một detector không đủ confidence (luật calibrated_agreement_v2: cả hai
+confidence ≥ ngưỡng, hình học lấy box thật có quality cao hơn); tracking per class; shape/track riêng; final
 checkpoint không tăng epochs; A rồi B dùng cùng nhãn; manual/automatic modes.
 
 Chưa kiểm chứng: CUDA compiled ops ST3D tương thích venv; source training thật;
@@ -30,8 +31,8 @@ thật; source dataset converters; resume worker; final prediction full dataset.
 Lệnh chạy lại:
 
 ```bash
-bash scripts/check.sh
-bash scripts/annoloop.sh doctor
+bash buildphase/annoloop_mvp/scripts/check.sh
+bash buildphase/annoloop_mvp/scripts/annoloop.sh doctor
 ```
 
 ## UI Streamlit — 13/10/2026
@@ -308,19 +309,3 @@ The active controller14399 still ran M4 source calibrationB with GPU worker25061
 984MiB; appPID9927/8502 health OK. That process retains old code; new memory is
 available on subsequent explicit controller launches. Native GPU training with
 new memory-generated selected labels has not been integration-tested yet.
-
-## 16/10/2026 — Standalone update validation
-
-269 unique test scenarios checked in batches: 258 passed before stopping the
-long-lived UI test process for runtime cost; 10 of the remaining11 passed in a
-fresh process. The new-project test caught an existing standalone setup bug:
-the class anchor loop overwrote the project name. Renamed the loop variable;
-that case and related creation/portable installation checks then passed (8
-checks). No unresolved failures; this is batch evidence, not a successful
-completion of the initial monolithic run.
-
-Python wheel built using existing GPU-venv setuptools (no GPU execution);
-catalog JSON/YAML/license inclusion verified. UI venv lacks setuptools for
-no-build-isolation packaging; no environment was modified. Syntax/whitespace
-checks and source-only Git audit passed. No GPU model run, CVAT request or
-cold installation on another machine was performed for this publish.

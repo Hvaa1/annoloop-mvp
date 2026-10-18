@@ -3,19 +3,19 @@
 Chạy từ thư mục VIN_Ai, dùng venv VIN_Ai:
 
 ```bash
-bash scripts/connect_model.sh --model MODEL_ID
+bash buildphase/annoloop_mvp/scripts/connect_model.sh --model MODEL_ID
 ```
 
 Kiểm tra thêm feature/class với một dự án đã lưu:
 
 ```bash
-bash scripts/connect_model.sh --model MODEL_ID --project PROJECT_ID
+bash buildphase/annoloop_mvp/scripts/connect_model.sh --model MODEL_ID --project PROJECT_ID
 ```
 
 Hoặc kết nối lại các gói đã tải, không tải thêm:
 
 ```bash
-bash scripts/connect_model.sh --all-installed
+bash buildphase/annoloop_mvp/scripts/connect_model.sh --all-installed
 ```
 
 `--data /path/to/data` chọn nơi lưu trạng thái khác. Model ID lấy từ kho model;
@@ -47,7 +47,7 @@ không đổi model A/B, không sửa verification hoặc snapshot nhãn, không
 Đã có đường import/kết nối riêng cho **hai payload ST3D/3DOD-LSF đã pin**:
 
 ```bash
-bash scripts/connect_model.sh --native-source lsf-secondiou-waymo-source --checkpoint /path/secondiou.pth
+bash buildphase/annoloop_mvp/scripts/connect_model.sh --native-source lsf-secondiou-waymo-source --checkpoint /path/secondiou.pth
 ```
 
 Xem [hướng dẫn native source](NATIVE_SOURCES.md). Chọn chúng ngay ở Class & model;

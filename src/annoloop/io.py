@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import time
 import uuid
 
 
@@ -37,6 +38,29 @@ def digest(path):
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             result.update(chunk)
     return result.hexdigest()
+
+
+_DIGESTS = {}
+
+
+def display_digest(path):
+    """SHA256 reused while the file identity is unchanged; for page views only.
+
+    Dispatch and upload paths must keep calling digest() directly.
+    """
+    path = Path(path).resolve()
+    signature = file_signature(path)
+    key = (str(path), signature)
+    if key in _DIGESTS:
+        return _DIGESTS[key]
+    value = digest(path)
+    # Like git's racy-index rule: a file touched within the timestamp granularity
+    # could change again without a new signature, so it is never cached.
+    if time.time_ns() - max(signature[3], signature[4]) > 2_000_000_000:
+        if len(_DIGESTS) >= 256:
+            _DIGESTS.clear()
+        _DIGESTS[key] = value
+    return value
 
 
 def file_signature(path):

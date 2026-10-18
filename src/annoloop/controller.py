@@ -13,6 +13,12 @@ from .tracking import refine
 from .pseudo_memory import MemoryPolicy, update as update_memory, validate as validate_memory
 from .memory_store import load as load_memory, context as memory_context
 
+MIN_POSITIVE_POINTS = 5
+# Agreement = accepted A/B pairs / confident boxes of the busier detector per frame.
+# Raw score>=.05 boxes (thousands per round) made the old ratio ~5% and unreachable.
+AGREEMENT_CONFIDENCE = .7
+AGREEMENT_DEFINITION = 'accepted_pairs_over_confident_boxes_v2'
+
 
 class RoundController:
     def __init__(self, store, project_id, adapters, initial_checkpoints, point_loader,
@@ -92,7 +98,7 @@ class RoundController:
 
     def shared(self, frames, current, previous=None):
         output = []
-        matched, selected, supported = 0, 0, 0
+        matched, selected, supported, trained = 0, 0, 0, 0
         for frame in frames:
             fid = frame["frame_id"]
             def active(boxes):
@@ -108,9 +114,14 @@ class RoundController:
             from .reused.core import points_in_box
             for box in row["boxes"]:
                 box["point_count"] = int(points_in_box(points, box["box"]).sum())
-                supported += box["point_count"] >= 5
+                supported += box["point_count"] >= MIN_POSITIVE_POINTS
             selected += len(row["boxes"])
             matched += len(row["boxes"])
+            # Same rule as final delivery and memory: an almost empty box is not taught as an object.
+            empty = [b for b in row["boxes"] if b["point_count"] < MIN_POSITIVE_POINTS]
+            row["boxes"] = [b for b in row["boxes"] if b["point_count"] >= MIN_POSITIVE_POINTS]
+            row["ignored"].extend(dict(b, training_policy="ignore_region", reason="insufficient_points") for b in empty)
+            trained += len(row["boxes"])
             output.append(row)
         if self.tracking_mode != "off":
             tracked = refine(output, self.point_loader, self.store.get(self.project_id)["schema"]["classes"],
@@ -120,11 +131,15 @@ class RoundController:
                 # Only geometrically supported interpolations become ignores; none become positives.
                 row["ignored"].extend(p for p in refined["proposals"] if p["training_policy"] == "ignore_region")
                 row["proposals"] = refined["proposals"]
-        denominator = sum(max(sum(b['class_name'] in self.adaptation_classes for b in current[k][f['frame_id']])
+        denominator = sum(max(sum(b['class_name'] in self.adaptation_classes
+                                  and b.get('confidence', 0) >= AGREEMENT_CONFIDENCE for b in current[k][f['frame_id']])
                               for k in ('A', 'B')) for f in frames)
         excluded_classes = [c for c in self.store.get(self.project_id)['schema']['classes'] if c not in self.adaptation_classes]
         proxies = dict(domain="target_unlabelled_proxy", target_gold_read=False, box_count=selected,
+                       trained_box_count=trained, min_positive_points=MIN_POSITIVE_POINTS,
                        agreement=matched / max(1, denominator), supported_fraction=supported / max(1, selected),
+                       agreement_definition=AGREEMENT_DEFINITION, agreement_confidence=AGREEMENT_CONFIDENCE,
+                       confident_box_denominator=denominator,
                        adaptation_classes=self.adaptation_classes, excluded_classes=excluded_classes)
         return dict(target_gold_read=False, frames=output, adaptation_classes=self.adaptation_classes,
                     excluded_classes=excluded_classes), proxies

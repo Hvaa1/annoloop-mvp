@@ -4,7 +4,7 @@ import streamlit as st
 from annoloop.io import read
 from annoloop.schema import ClassSchema
 from annoloop.selection import SelectionPolicy
-from annoloop.settings import WORKSPACE
+from annoloop.settings import BROWSE_ROOT as WORKSPACE
 from annoloop.setup import inspect_source,inspect_target,model_catalog,make_plan,prepare_project
 from components import hero,chips
 
@@ -79,6 +79,11 @@ def wizard(store,settings):
     source,target=data
     a,b,c=st.columns(3)
     a.metric('Source train',len(source['frames']['train']));b.metric('Source validation',len(source['frames']['validation']));c.metric('Target media',target['frame_count'])
+    profile=target.get('point_profile')
+    if profile and profile['complete']:
+        st.caption('Đặc trưng target: '+', '.join(profile['features'])+f" · đã kiểm tra {profile['checked']} frame mẫu. Không đọc nhãn target.")
+    elif profile and profile['errors']:
+        st.warning('Chưa xác định đủ cột point cloud. BIN cần khai báo feature_names hoặc pointcloud_format.json; tool không đoán intensity từ số byte.')
     if target['data_type']!='3d':
         st.info('Đã nhận dạng dataset 2D. Workflow hai detector 3D chưa áp dụng cho dữ liệu này.');return
     st.subheader('2. Nhãn cần gán')

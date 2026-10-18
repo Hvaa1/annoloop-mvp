@@ -45,10 +45,18 @@ def load_xyz(path,bin_columns=None):
         from pypcd4 import PointCloud
         points=PointCloud.from_path(str(path)).numpy(('x','y','z'))
     elif path.suffix.lower()=='.bin':
-        if bin_columns not in (3,4,5):raise ValueError('BIN cần xác nhận số cột XYZ/XYZI/XYZIT')
+        from .point_format import binary_contract
+        contract=binary_contract(dict(media=str(path)))
+        names=contract['feature_names'] if contract else None
+        if names:
+            if bin_columns is not None and bin_columns!=len(names):
+                raise ValueError('Số cột BIN đã chọn không khớp khai báo dataset: '+str(len(names)))
+            bin_columns=len(names)
+        if bin_columns not in (3,4,5):raise ValueError('BIN cần xác nhận 3/4/5 cột và ý nghĩa feature')
         raw=np.fromfile(path,dtype='<f4')
         if len(raw)%bin_columns:raise ValueError('BIN không khớp số cột đã chọn')
         points=raw.reshape(-1,bin_columns)
+        if names:points=points[:,[names.index(axis) for axis in ('x','y','z')]]
     else:raise ValueError('Media chưa hỗ trợ preview 3D')
     if points.ndim!=2 or points.shape[1]<3 or not len(points):raise ValueError('Point cloud cần N×3 hoặc hơn')
     xyz=np.asarray(points[:,:3],dtype=np.float32)

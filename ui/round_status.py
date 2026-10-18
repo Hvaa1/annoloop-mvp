@@ -10,7 +10,17 @@ REASONS = {
     'agreement_regressed': 'Tỷ lệ đồng thuận giảm quá mức cho phép',
     'supported_fraction_regressed': 'Tỷ lệ box đủ điểm giảm quá mức cho phép',
     'box_growth_exceeded': 'Số box tăng quá mức cho phép',
+    'agreement_decreased': 'Tỷ lệ đồng thuận thấp hơn vòng đang dùng',
 }
+
+
+def agreement_rule_text(policy, decision):
+    # Rounds decided before the trend rule carry no rule name: they used the absolute threshold.
+    if (decision.get('agreement_rule') or 'threshold') == 'threshold':
+        return f"≥ {policy['min_agreement']:.2%}"
+    if decision.get('compared_with_previous'):
+        return f"≥ vòng đang dùng ({decision['previous_agreement']:.2%})"
+    return 'Mốc đầu (chưa có vòng cùng cách tính để so)'
 
 
 def selection_status(store, project):
@@ -43,11 +53,19 @@ def selection_status(store, project):
         policy = saved_policy or project['selection_policy']
         st.dataframe([
             {'Tiêu chí': 'Đồng thuận', 'Kết quả': f"{metrics['agreement']:.2%}",
-             'Ngưỡng': f"≥ {policy['min_agreement']:.2%}"},
+             'Ngưỡng': agreement_rule_text(policy, decision)},
             {'Tiêu chí': 'Box có đủ điểm', 'Kết quả': f"{metrics['supported_fraction']:.2%}",
              'Ngưỡng': f"≥ {policy['min_supported_fraction']:.2%}"},
             {'Tiêu chí': 'Nhãn chung', 'Kết quả': str(metrics['box_count']), 'Ngưỡng': '> 0'},
+            *([{'Tiêu chí': 'Nhãn dùng để train (đủ điểm)', 'Kết quả': str(metrics['trained_box_count']),
+                'Ngưỡng': f"≥ {metrics.get('min_positive_points', 5)} point / box"}] if 'trained_box_count' in metrics else []),
         ], hide_index=True, width='stretch')
+        if metrics.get('agreement_definition'):
+            st.caption(f"Đồng thuận = số cặp A/B được nhận ÷ số box confidence ≥ {metrics.get('agreement_confidence', .7):g} "
+                       f"của model nhiều box hơn ở mỗi frame ({metrics.get('confident_box_denominator', 0)} box).")
+        else:
+            st.caption('Vòng cũ: đồng thuận chia cho mọi box thô (score ≥ 0.05), nên thường rất thấp; '
+                       'không so trực tiếp với vòng dùng cách tính mới.')
         st.caption('Các chỉ số này là proxy trên target không nhãn, không đo accuracy hoặc recall. '
                    + ('Ngưỡng được lưu lúc hoàn tất vòng.' if saved_policy else
                       'Vòng cũ chưa lưu ngưỡng riêng; bảng dùng ngưỡng hiện tại của dự án.'))

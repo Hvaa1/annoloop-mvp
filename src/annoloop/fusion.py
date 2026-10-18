@@ -74,12 +74,22 @@ def normalize(document, calibration, checkpoint_sha256, classes, adaptation_clas
     return result
 
 
-def dominates(first, second):
-    return first["confidence"] >= second["confidence"] and first["quality"] >= second["quality"]
+FUSION_RULE = 'calibrated_agreement_v2'
+
+
+def geometry_winner(first, second):
+    """Real box with the better calibrated quality; boxes are never averaged."""
+    return max((first, second), key=lambda b: (b["quality"], b["confidence"]))
 
 
 def compare(first, second, min_iou=.3, min_confidence=.7, min_quality=.5):
-    """Accept a dominating matched box; disagreement/unmatched regions remain review."""
+    """Accept matched boxes only when both detectors are confident.
+
+    Geometry comes from the higher-quality real box. Replaces the old Pareto
+    dominance rule: on labelled source validation (Test M1) dominance accepted
+    pairs whose partner was unconfident (P(IoU>=.5)=.73) and rejected confident
+    pairs with crossed scores (.89). Averaging boxes measured worse than the winner.
+    """
     if not 0 < min_iou <= 1:
         raise ValueError("IoU threshold không hợp lệ")
     for box in first + second:
@@ -99,15 +109,16 @@ def compare(first, second, min_iou=.3, min_confidence=.7, min_quality=.5):
             continue
         used_a.add(i); used_b.add(j)
         a, b = first[i], second[j]
-        winner = b if dominates(b, a) else a if dominates(a, b) else None
-        if winner is not None and (winner["confidence"] < min_confidence or winner["quality"] < min_quality):
-            review.extend(dict(box, training_policy="ignore_region", reason="low_calibrated_quality") for box in (a, b))
-            continue
-        if winner:
-            positive.append(dict(winner, match_iou=float(ious[i, j]),
+        winner = geometry_winner(a, b)
+        confident = [box["confidence"] >= min_confidence for box in (a, b)]
+        if all(confident) and winner["quality"] >= min_quality:
+            positive.append(dict(winner, match_iou=float(ious[i, j]), fusion_rule=FUSION_RULE,
+                                 partner_confidence=float(min(a["confidence"], b["confidence"])),
                                  training_policy="positive", matched_ids=[a["id"], b["id"]]))
         else:
-            review.extend(dict(box, training_policy="ignore_region", reason="quality_conflict") for box in (a, b))
+            # One confident detector against an unconfident one is a disagreement.
+            reason = "quality_conflict" if any(confident) and winner["quality"] >= min_quality else "low_calibrated_quality"
+            review.extend(dict(box, training_policy="ignore_region", reason=reason) for box in (a, b))
     review.extend(dict(b, training_policy="ignore_region", reason="unmatched") for i, b in enumerate(first) if i not in used_a)
     review.extend(dict(b, training_policy="ignore_region", reason="unmatched") for i, b in enumerate(second) if i not in used_b)
     return positive, review

@@ -19,7 +19,7 @@ def run(root, settings):
     from .native_adapter import NativeDetectorAdapter
     from .device import gpu_idle
     from .inspection import load_xyz
-    from .fusion import calibrate_source, normalize, compare
+    from .fusion import calibrate_source, normalize, compare, FUSION_RULE
     from .ensemble_fusion import fuse_frame, EnsemblePolicy
     from .cvat import package
     from .schema import ClassSchema
@@ -56,11 +56,13 @@ def run(root, settings):
             key = f'model_{index + 1:03d}'
             if digest(model['path']) != model['checkpoint_sha256'] or digest(model['config']) != model['config_sha256']:
                 raise ValueError('Checkpoint/config thay đổi sau dispatch')
-            supported = [c for c in classes if c in model['classes']]
+            from .model_hub import canonical
+            supported = [c for c in classes if canonical(c) in {canonical(n) for n in model['classes']}]
             if not supported:
                 raise ValueError('Model đã chọn không hỗ trợ class đang chạy')
             gpu_idle()
-            adapter = NativeDetectorAdapter(model, supported, frames, root / key, settings, config['bin_columns'])
+            from .detector_factory import create
+            adapter = create(model, supported, frames, root / key, settings, config['bin_columns'],read(store.path(pid)/'setup.json'))
             stage(root, 'source_validation', model=key, architecture=model['architecture'],
                   model_index=index + 1, model_total=len(config['models']))
             records = adapter.predict_source_validation(model['path'])
@@ -125,6 +127,7 @@ def run(root, settings):
         result = dict(frames=outputs, providers=providers, class_names=classes,
                       dataset_sha256=spec['dataset_sha256'], target_gold_read=False, optimizer_steps=0,
                       scope=spec['scope'] if delivery else 'adaptation_only', policy=config['policy'],
+                      fusion_rule=FUSION_RULE if config.get('fusion_mode')=='ab' else 'local_ensemble_vote',
                       cvat_package=str(package_path), cvat_sha256=digest(package_path),
                       positive_count=sum(f['boxes'] for f in outputs),
                       ignored_count=sum(f['ignored'] for f in outputs))

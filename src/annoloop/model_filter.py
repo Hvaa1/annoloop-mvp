@@ -28,10 +28,10 @@ def point_features(frame):
         if declared and len(declared)==array.shape[1]:return list(declared)
         if not declared and array.shape[1]==3:return ['x','y','z']
         raise ValueError('NPY nhiều cột cần khai báo ý nghĩa từng cột')
-    if path.suffix.lower()=='.bin' and declared:
-        if len(declared)<3 or path.stat().st_size % (4*len(declared)):
-            raise ValueError('BIN không khớp số cột đã khai báo')
-        return list(declared)
+    if path.suffix.lower()=='.bin':
+        from .point_format import binary_contract
+        contract=binary_contract(frame)
+        if contract:return contract['feature_names']
     raise ValueError('Chưa xác định đặc trưng từng cột của '+path.suffix)
 
 
@@ -54,6 +54,11 @@ def dataset_profile(frames,limit=16):
 
 
 def requirements(model):
+    if model.get('mmdet_recipe'):
+        from .mmdet_recipe import current
+        recipe=model['mmdet_recipe']
+        if current(recipe):return dict(features=[f for f in recipe['features'] if f!='time' or recipe.get('input_mode')!='current_scan_only'],sweeps=recipe['sweeps'])
+        return None
     if model.get('backend','registry_framework')=='native_st3d':
         try:
             cfg=yaml.safe_load(Path(model['config']).read_text())
@@ -85,7 +90,7 @@ def assess(model,classes,profile,source_counts=None):
             if absent:reasons.append('Source '+split+' thiếu nhãn: '+', '.join(absent))
     if model.get('modality','point_cloud')!='point_cloud':reasons.append('Cần dữ liệu camera hoặc modality khác')
     native=model.get('backend','registry_framework')=='native_st3d'
-    if not native:reasons.append('Chưa có adapter adaptation train / calibration / signed-ignore')
+    if not native and not model.get('mmdet_recipe',{}).get('implementation_supported'):reasons.append('Chưa có adapter adaptation train / calibration / signed-ignore')
     contract=requirements(model)
     missing=[]
     if contract is None:reasons.append('Chưa xác minh yêu cầu đặc trưng đầu vào của checkpoint')
@@ -95,7 +100,22 @@ def assess(model,classes,profile,source_counts=None):
         if missing:reasons.append('Target thiếu feature: '+', '.join(missing))
         if contract.get('sweeps',1)>1 and not profile['sweeps_available']:
             reasons.append(f"Cần {contract['sweeps']} sweep có timestamp / ego pose; chưa có manifest được hỗ trợ")
+    # Selection is not execution permission. Missing implementation is resolved
+    # after download; unknown contracts remain visibly pending, never "compatible".
+    selection_blockers=[]
+    if missing_classes:selection_blockers.append('Thiếu class: '+', '.join(missing_classes))
+    if model.get('modality','point_cloud')!='point_cloud':selection_blockers.append('Cần camera hoặc modality khác')
+    if contract and profile['complete'] and missing:
+        selection_blockers.append('Target thiếu feature: '+', '.join(missing))
+    if contract and contract.get('sweeps',1)>1 and not profile['sweeps_available']:
+        selection_blockers.append('Thiếu multi-sweep / timestamp / ego pose')
+    from .mmdet_recipe import LEGACY_CONVENTION
+    if LEGACY_CONVENTION in model.get('mmdet_recipe',{}).get('blockers',[]):
+        # Known-wrong box decoding, measured on labelled source; never a pending draft.
+        reasons.append(LEGACY_CONVENTION);selection_blockers.append(LEGACY_CONVENTION)
+    input_status='incompatible' if selection_blockers else 'compatible' if contract and profile['complete'] else 'pending'
     return dict(eligible=not reasons,reasons=reasons,missing_classes=missing_classes,
                 missing_features=missing,contract=contract,
+                selectable=not selection_blockers,selection_blockers=selection_blockers,input_status=input_status,
                 # Candidate eligibility never replaces per-project GPU verification.
                 gpu_verified=False)

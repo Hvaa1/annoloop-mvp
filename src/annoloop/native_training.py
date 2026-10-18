@@ -41,6 +41,16 @@ def prepare(spec):
     return torch, cfg, dataset, model.cuda()
 
 
+def checked_gradients(torch,model):
+    nonzero=0
+    for parameter in model.parameters():
+        if parameter.grad is None:continue
+        if not torch.isfinite(parameter.grad).all():raise ValueError('Diagnostic gradients NaN/Inf')
+        if parameter.requires_grad and torch.count_nonzero(parameter.grad).item():nonzero+=1
+    if not nonzero:raise ValueError('Backward không có gradient khác 0 vào tham số cần học')
+    return nonzero
+
+
 def verify(root):
     """Real source/target inference and backward; zero optimizer steps."""
     root = Path(root)
@@ -72,6 +82,8 @@ def verify(root):
     # labels are involved in this diagnostic, never target gold.
     ignored = truth[:1].copy()
     ignored[:, 0] += 15
+    bounds=np.asarray(cfg.DATA_CONFIG.POINT_CLOUD_RANGE)
+    ignored[:,:2]=np.clip(ignored[:,:2],bounds[:2]+5,bounds[3:5]-5)
     ignored[:, -1] *= -1
     row['gt_boxes'] = np.concatenate([truth, ignored])
     batch = dataset.collate_batch([row])
@@ -81,8 +93,10 @@ def verify(root):
     if not torch.isfinite(loss):
         raise ValueError('Diagnostic loss không hữu hạn')
     loss.backward()
-    if any(p.grad is not None and not torch.isfinite(p.grad).all() for p in model.parameters()):
-        raise ValueError('Diagnostic gradients NaN/Inf')
+    source_gradients=checked_gradients(torch,model)
+    ignore_counts=dict(model._annoloop_ignore_counts)
+    if not ignore_counts['dense']:
+        raise ValueError('Batch kiểm tra chưa có anchor nền được ignore; không cấp chứng nhận ignore')
     source_loss = float(loss.detach().cpu())
     del loss, batch
     model.zero_grad(set_to_none=True)
@@ -94,12 +108,13 @@ def verify(root):
     if not torch.isfinite(target_loss):
         raise ValueError('Target diagnostic loss NaN/Inf')
     target_loss.backward()
-    if any(p.grad is not None and not torch.isfinite(p.grad).all() for p in model.parameters()):
-        raise ValueError('Target diagnostic gradients NaN/Inf')
+    target_gradients=checked_gradients(torch,model)
     write(root / 'verified.json', dict(verified_at=now(), checkpoint_sha256=spec['checkpoint_sha256'],
           config_sha256=spec['config_sha256'], architecture=cfg.MODEL.NAME,
           separate_scores_checked=True, forward_backward_checked=True,
           signed_ignore_hooks_installed=True, optimizer_steps=0, target_gold_read=False,
+          signed_ignore_effect_checked=True,ignore_counts=ignore_counts,
+          source_gradient_tensors=source_gradients,target_gradient_tensors=target_gradients,
           diagnostic_domain='source_train_validation_and_unlabelled_target',
           source_loss=source_loss, target_loss=float(target_loss.detach().cpu()),
           target_adapter_backward_checked=True, diagnostic_predictions_not_promoted=True))

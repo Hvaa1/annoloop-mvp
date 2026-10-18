@@ -8,6 +8,23 @@ import streamlit as st
 from annoloop.reused.training_monitor import ANSI
 
 
+def live_fragment(interval):
+    """Fragment that polls only while work is running; otherwise it renders once.
+
+    Polling a multi-second page every few seconds with nothing running kept the
+    UI busy. Callers pass live=…; the live view triggers a full rerun when work ends.
+    """
+    def decorate(function):
+        polling = st.fragment(run_every=interval)(function)
+        still = st.fragment(function)
+        def call(*args, live=True, **kwargs):
+            return (polling if live else still)(*args, **kwargs)
+        call.__name__ = function.__name__
+        call.__wrapped__ = function
+        return call
+    return decorate
+
+
 def hero(kicker, title, description):
     st.markdown(f'<div class="hero"><div class="eyebrow">{escape(kicker)}</div><h2>{escape(title)}</h2><p>{escape(description)}</p></div>', unsafe_allow_html=True)
 

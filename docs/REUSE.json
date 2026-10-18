@@ -15,7 +15,7 @@
     "original": "buildphase/lidar_qa_demo/training_monitor.py",
     "original_sha256": "38ee4630414684a6871d8d0ed36bba83fc129ff20115ec05db1c35b10bcf46f8",
     "copied_to": "src/annoloop/reused/training_monitor.py",
-    "copied_sha256": "3d708b4c98f27c088682dd22b695f9dc2b34d06e84b6969956a5e0d24890312e"
+    "copied_sha256": "38ee4630414684a6871d8d0ed36bba83fc129ff20115ec05db1c35b10bcf46f8"
   },
   {
     "original": "buildphase/lidar_qa_demo/experiments/gold_geometry.py",
@@ -32,14 +32,13 @@
   {
     "original": "buildphase/lidar_qa_demo/co_training/consensus.py:isotonic",
     "original_sha256": "6db6a2de49d511c47f9c016713f8d9e063e0d91e5b0a83008bb6eed9686fd573",
-    "copied_to": "src/annoloop/reused/calibration.py",
-    "copied_sha256": "2b435ecf48b6ceb4378de52f9044ce7be9e2073d375813137870f19ee69b564d"
+    "copied_to": "src/annoloop/reused/calibration.py"
   },
   {
     "original": "buildphase/lidar_qa_demo/cuda_runtime.py",
     "original_sha256": "7a6593dd30d9c3e6c5a8d5abd7930c07aeadb1a1603263a269fb4001ab1eb427",
     "copied_to": "src/annoloop/runtime.py",
-    "copied_sha256": "cf9a76dfd7f61745442c044b08d7a3d56844d0a2194338923736639a80f99591",
+    "copied_sha256": "d7de18fbfa3bc74ba4ed9469f0a39ef5c136aeffab08c3e8b935b47920004922",
     "note": "Adapted configure_sparse_headers and NVRTC library alias ideas; original demo file unchanged."
   }
 ]

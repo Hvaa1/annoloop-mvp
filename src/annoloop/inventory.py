@@ -52,6 +52,14 @@ def inspect_dataset(root, schema_override=None):
             raise ValueError("Difficulty phải là easy/hard/unknown")
         frames.append(dict(frame_id=fid, media=str(path), split=split, sequence_id=sequence,
                            timestamp=timestamp, difficulty=difficulty, sha256=digest(path)))
+        declared=row.get('feature_names',manifest.get('feature_names'))
+        if declared is not None:
+            from .point_format import validate_features
+            frames[-1]['feature_names']=validate_features(declared)
+        if schema.data_type=='3d' and path.suffix.lower()=='.bin':
+            from .point_format import binary_contract
+            contract=binary_contract(frames[-1])
+            if contract:frames[-1].update(contract)
         frames[-1].update({key: row[key] for key in ("lidar_to_world", "pose_source", "pose_quality_passed") if key in row})
     return dict(root=str(root), schema=schema.as_dict(), class_evidence=evidence,
                 frames=frames, target_gold_read=False)

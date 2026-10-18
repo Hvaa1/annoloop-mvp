@@ -43,6 +43,19 @@ def connect(data,model,project_id=None):
                     'Nối source validation và calibration vào DetectorAdapter.',
                     'Nối loss target và signed-ignore, checkpoint / resume vào DetectorAdapter.'])
             if profile['status']!='prepared_unverified':raise ValueError('Trạng thái binding không hợp lệ')
+            if model['framework']=='mmdetection3d':
+                from .mmdet_recipe import describe
+                try:
+                    recipe=describe(profile['config'],profile['upstream_root'])
+                    report['mmdet_recipe']=recipe
+                    if recipe['implementation_supported']:
+                        report['capabilities'].update(source_validation_implemented=True,calibration_implemented=True,
+                            signed_ignore_implemented=True,target_training_implemented=True)
+                        report['entrypoints'].update(predict_source_validation='annoloop.mmdet_adapter:MMDetDetectorAdapter.predict_source_validation',
+                            train_target='annoloop.mmdet_adapter:MMDetDetectorAdapter.train_target',calibration='annoloop.fusion:calibrate_source')
+                        report['missing_steps']=['Chưa kiểm chứng runtime/strict load/predict/backward/ignore/calibration trên dự án.',*recipe['blockers']]
+                except (ValueError,OSError,SyntaxError,TypeError) as error:
+                    report['missing_steps'].append('Chưa đọc được recipe MMDetection3D: '+str(error))
         if project_id:
             from .projects import ProjectStore
             from .model_filter import dataset_profile,assess
@@ -52,8 +65,9 @@ def connect(data,model,project_id=None):
             config_path=store.path(project_id)/'adaptation.json'
             classes=read(config_path).get('adaptation_classes',project['schema']['classes']) if config_path.exists() else project['schema']['classes']
             profile=dataset_profile([f for f in inventory['frames'] if f['split']=='adaptation'])
+            candidate=dict(model,mmdet_recipe=report['mmdet_recipe']) if report.get('mmdet_recipe') else model
             report['project_check']=dict(project_id=project_id,dataset_sha256=project['dataset_sha256'],
-                input_profile=profile,assessment=assess(model,classes,profile,setup['source_counts']))
+                input_profile=profile,assessment=assess(candidate,classes,profile,setup['source_counts']))
         # Preserve attempts; do not modify selection, verification or round receipts.
         attempt=root/'connections'/uuid.uuid4().hex/'report.json'
         report['receipt']=str(attempt)

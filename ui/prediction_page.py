@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from annoloop import previews
 from annoloop.io import read
-from components import box_plot
+from components import box_plot, live_fragment
 
 
 @st.cache_data(show_spinner=False, max_entries=16)
@@ -13,8 +13,13 @@ def cloud(media, checksum, columns, modified, size):
     return previews.point_preview({'media': media, 'sha256': checksum}, columns)
 
 
-@st.fragment(run_every=5)
 def saved_predictions(store, project):
+    from annoloop.adaptation import active_job
+    _saved_predictions(store, project, live=active_job(store, project['id']) is not None)
+
+
+@live_fragment(5)
+def _saved_predictions(store, project):
     latest = store.get(project['id'])
     if any(latest[k] != project[k] for k in ('completed_rounds', 'selected_version')):
         st.rerun(scope='app')

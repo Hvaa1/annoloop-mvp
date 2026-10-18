@@ -1,0 +1,22 @@
+# docker compose up -d   →   http://localhost:8502
+# Needs an NVIDIA driver + NVIDIA Container Toolkit on the host (see docs/DOCKER.md).
+services:
+  annoloop:
+    build: .
+    image: annoloop:latest
+    ports:
+      - "${ANNOLOOP_PORT:-8502}:8502"
+    volumes:
+      - ./data:/data
+      - ${ANNOLOOP_DATASETS:-./datasets}:/datasets:ro
+    shm_size: 8gb
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # reach a CVAT server running on the host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped

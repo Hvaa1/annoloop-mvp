@@ -4,7 +4,7 @@ import json
 import streamlit as st
 from annoloop import local_ensemble as service
 from annoloop.io import read, digest
-from components import box_plot
+from components import box_plot, live_fragment
 
 
 def inventory_table(rows):
@@ -21,13 +21,16 @@ def choose(store, settings, project):
     pid=project['id']; saved=service.configuration(store,pid)
     mode=st.radio('Cách sử dụng model', ['Adaptation A/B','Ghép checkpoint local'],
         index=int(bool(saved.get('enabled'))), horizontal=True, key='ensemble_mode_'+pid)
-    rows=service.discover(store,pid,settings)
-    imported=[m for m in rows if m['origin'].startswith('ST3D chính thức')]
-    with st.expander(f'Checkpoint trên máy · {len(rows)} file · {len(imported)} ST3D mới tải',
-                     expanded=mode=='Ghép checkpoint local'):
-        if rows:inventory_table(rows)
-        else:st.info('Chưa tìm thấy checkpoint có receipt/config trong thư mục dữ liệu của app.')
-        st.caption('Đọc receipt/config local, không load model hoặc tải mạng. “Có thể gửi kiểm tra” chưa phải chứng nhận GPU/chất lượng. File cùng hash được gộp khi lưu lựa chọn.')
+    # Scanning receipts takes ~1s; the A/B route only needs it on request.
+    rows=[]
+    if mode!='Adaptation A/B' or st.toggle('Xem checkpoint local trên máy',key='ensemble_inventory_'+pid):
+        rows=service.discover(store,pid,settings)
+        imported=[m for m in rows if m['origin'].startswith('ST3D chính thức')]
+        with st.expander(f'Checkpoint trên máy · {len(rows)} file · {len(imported)} ST3D mới tải',
+                         expanded=mode=='Ghép checkpoint local'):
+            if rows:inventory_table(rows)
+            else:st.info('Chưa tìm thấy checkpoint có receipt/config trong thư mục dữ liệu của app.')
+            st.caption('Đọc receipt/config local, không load model hoặc tải mạng. “Có thể gửi kiểm tra” chưa phải chứng nhận GPU/chất lượng. File cùng hash được gộp khi lưu lựa chọn.')
     if mode=='Adaptation A/B':
         if saved.get('enabled'):
             st.info('Workflow đang lưu là ghép local. Bấm dưới đây để quay về A/B; các lượt cũ được giữ.')
@@ -60,7 +63,7 @@ def choose(store, settings, project):
         'Nhóm độc lập':len({m['vote_group'] for m in models})} for name,models in coverage.items()],hide_index=True,width='stretch')
     st.caption('Nhiều epoch của cùng kiến trúc chỉ tính một nhóm biểu quyết. Model không hỗ trợ một class không bị tính là bỏ sót class đó. Một nhóm duy nhất cần ngưỡng chặt hơn.')
     columns=st.selectbox('Số cột nếu dữ liệu BIN',[3,4,5],index=[3,4,5].index(saved.get('bin_columns',4)),
-        format_func=lambda n:{3:'3 · XYZ',4:'4 · XYZI',5:'5 · XYZIT'}[n],key='ensemble_bin_'+pid)
+        format_func=lambda n:{3:'3 · XYZ',4:'4 · XYZI',5:'5 · theo khai báo dataset'}[n],key='ensemble_bin_'+pid)
     confirmed=st.checkbox('Tôi xác nhận XYZ theo mét; X trước, Y trái, Z lên',
         value=saved.get('coordinates_confirmed',False),key='ensemble_axes_'+pid)
     st.caption('Mặc định: IoU ≥ 0.5; confidence ≥ 0.7; quality ≥ 0.5; ít nhất 5 point. Một nhóm: confidence ≥ 0.9 và quality ≥ 0.6. Đây là ngưỡng chọn nhãn, không bảo đảm accuracy.')
@@ -83,8 +86,12 @@ def prepare(store,settings,project):
     return True
 
 
-@st.fragment(run_every=5)
 def monitor(store,project):
+    _monitor(store,project,live=service.active(store,project['id']))
+
+
+@live_fragment(5)
+def _monitor(store,project):
     paths=service.jobs(store,project['id'])
     if not paths:return
     root=paths[0].parent;state=service.status(root)

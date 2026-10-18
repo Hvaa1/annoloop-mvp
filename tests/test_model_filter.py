@@ -41,6 +41,17 @@ class FilterTests(unittest.TestCase):
         row=assess(dict(classes=['car'],runtime_verified=True,adaptation_ready=True),['car'],self.profile)
         self.assertFalse(row['eligible'])
         self.assertTrue(any('Chưa xác minh' in r for r in row['reasons']))
+        self.assertTrue(row['selectable']);self.assertEqual(row['input_status'],'pending')
+
+    def test_missing_recipe_is_not_a_pre_download_selection_blocker(self):
+        m=dict(classes=['car'],framework='mmdetection3d',config_files={'config.py':{}},
+            input_contract=dict(features=['x','y','z'],sweeps=1,evidence=['config.py']))
+        row=assess(m,['car'],self.profile)
+        self.assertTrue(row['selectable']);self.assertFalse(row['eligible'])
+        self.assertEqual(row['input_status'],'compatible')
+        m['input_contract']['features'].append('intensity')
+        row=assess(m,['car'],self.profile)
+        self.assertFalse(row['selectable']);self.assertIn('intensity',row['missing_features'])
 
     def test_source_class_availability_is_independent_of_checkpoint_coverage(self):
         cfg=self.root/'source.yaml';cfg.write_text('DATA_CONFIG:\n  POINT_FEATURE_ENCODING:\n    used_feature_list: [x, y, z]\n')

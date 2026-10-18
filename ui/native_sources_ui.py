@@ -4,10 +4,17 @@ from annoloop.io import read
 from annoloop.native_sources import entry,root_for,start_download
 from annoloop.native_source_binding import bind
 from annoloop.reused.training_monitor import process_identity
+from components import live_fragment
 
 
-@st.fragment(run_every='2s')
 def progress(settings,identifier):
+    root=root_for(settings.data,identifier)
+    launch=read(root/'launch.json') if (root/'launch.json').exists() else {}
+    _progress(settings,identifier,live=bool(launch.get('process_start') and process_identity(launch.get('pid'))==launch['process_start']))
+
+
+@live_fragment('2s')
+def _progress(settings,identifier):
     root=root_for(settings.data,identifier)
     state=read(root/'download.json') if (root/'download.json').exists() else {}
     launch=read(root/'launch.json') if (root/'launch.json').exists() else {}

@@ -4,6 +4,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import importlib.util
 import streamlit as st
+from components import live_fragment
 from annoloop import final_delivery as delivery,local_ensemble
 from annoloop.io import read
 from annoloop.cvat import check_login
@@ -14,8 +15,12 @@ def sdk_available():
     return importlib.util.find_spec('cvat_sdk') is not None
 
 
-@st.fragment(run_every=5)
 def monitor(root):
+    _monitor(root,live=local_ensemble.status(root)['process_alive'])
+
+
+@live_fragment(5)
+def _monitor(root):
     state=local_ensemble.status(root)
     st.write('Final predict · '+state['status'])
     st.caption('Bước: '+state.get('stage','')+' · '+str(state.get('model') or ''))

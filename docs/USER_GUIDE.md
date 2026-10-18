@@ -1,16 +1,33 @@
 # AnnoLoop — hướng dẫn dùng nhanh
 
+Recipe mới: [MMDetection3D và script chuẩn bị](MMDET3D_ADAPTER.md). Runtime
+model chuẩn bị một lần; chọn checkpoint cùng recipe không phải viết JSON/YAML.
+Nếu mỗi file target là một scan riêng, có thể chọn current-scan mode ở bước2/3
+để dùng elapsed time0 thay cho lịch sử; đây là lựa chọn explicit có thể giảm
+chất lượng, không tạo sweep giả. Chưa có kiểm chứng model MMDet thật trên GPU.
+
 ## Mở app
 
 ```bash
-bash scripts/start_ui.sh
+bash buildphase/annoloop_mvp/scripts/start_ui.sh
 ```
 
-Mở **http://localhost:8502**. UI dùng `.venv` của checkout. Worker GPU dùng venv riêng tương thích với model; trên
-profile mặc định là `.venv-gpu` với Torch 2.0/CUDA 11.8 và các extension đã build. Không chạy `app.py`
+Mở **http://localhost:8502**. UI dùng venv VIN_Ai. Worker GPU dùng venv riêng tương thích với model; trên
+máy này là `.venv-centerpoint` với Torch 2.0/CUDA 11.8 và các extension đã build. Không chạy `app.py`
 trực tiếp bằng python. Đổi cổng bằng `ANNOLOOP_PORT=8503` nếu cần.
 
 ## Một workflow, chọn model một lần
+
+Với **nuScenes source → KITTI target**, chọn folder source nuScenes đã chuẩn bị
+và `datasets/kitti_mini` cho target. Bản mini có `pointcloud_format.json`, tool tự
+đọc **x, y, z, intensity (4 cột)** và đối chiếu SHA256/số điểm. File format này
+chỉ có metadata point cloud; nhãn `label_2`, calibration và `subset_manifest.json`
+không được mở để chọn class/pseudo-label target. Không cần tạo thêm JSON/YAML.
+
+Trong dự án test3 cũ, metadata format được đọc từ folder media mà không sửa
+snapshot dự án. Dự án mới lưu cả feature_names và hash metadata vào inventory.
+Chọn sai số cột sẽ bị chặn khi kiểm tra đầu vào; chứng nhận GPU mới gắn với
+metadata format. Source và các ngưỡng class/adapter/calibration vẫn giữ nguyên.
 
 Sidebar có 6 bước: **Dữ liệu → Class & model → Chuẩn bị model → Adaptation →
 Kết quả & so sánh → Xuất CVAT**. Tên, ID dự án và phiên bản đang dùng hiện trên
@@ -70,20 +87,22 @@ chọn phiên bản bằng tay/theo ngưỡng và epoch/ROS khi cần học clas
 
 ### Lọc model trước khi tải
 
-Ở **Class & model**, bộ lọc **Chỉ hiện model phù hợp cho adaptation** mặc định bật.
-Tool kiểm tra class của checkpoint, nhãn trong source train/validation, feature
-đầu vào và backend train/calibration/ignore. Nó đọc header tối đa 16 frame rải
+Ở **Class & model**, bộ lọc **Chỉ hiện model khớp class và đầu vào** mặc định bật.
+Tool kiểm tra class checkpoint và feature đầu vào; thiếu backend không ẩn model.
+Nhãn source và backend được kiểm tra riêng trước khi chạy. Tool đọc tối đa 16 frame rải
 đều trên target, hiển thị số mẫu đã đọc; không đọc nhãn target hay chạy detector.
 
 Ví dụ: PCD có `x, y, z, rgb` dùng được cho model XYZ; `rgb` không thay được cho
 `intensity`. Model cần nhiều sweep bị loại khi chưa có manifest được adapter hỗ
 trợ. BIN/NPY nhiều cột mà chưa khai báo ý nghĩa cột sẽ hiện chưa xác minh.
 
-Mở **model chưa phù hợp · xem lý do** để biết checkpoint bị loại vì sao. Yêu cầu
-đầu vào chưa có bằng chứng sẽ hiện **chưa xác minh**, không tự đoán theo tên model.
+Mở **model còn bước chuẩn bị / kiểm chứng · xem lý do** để biết bước còn thiếu.
+Đầu vào chưa có bằng chứng hiện **chờ xác minh**, vẫn có thể chọn để chuẩn bị;
+không tự đoán theo tên model và không coi là đã tương thích.
 Hiện contract đầu vào registry mới được ghi rõ cho hai gói SECOND KITTI và
 PointPillars nuScenes đã kiểm tra; các gói khác vẫn có thể chưa xác minh feature.
-Generic adapter chưa đầy đủ nên các gói registry hiện không qua lọc adaptation.
+Generic adapter chưa đầy đủ vẫn được chọn/tải nếu khớp class và đầu vào;
+train/calibration/ignore còn thiếu sẽ chặn adaptation sau bước chuẩn bị.
 
 Bỏ bộ lọc chỉ để xem/chọn gói chuẩn bị nghiên cứu; không mở quyền chạy adaptation.
 Ở trang chuẩn bị, lựa chọn không phù hợp bị khóa bước tiếp và chỉ hiện nút tải
@@ -240,9 +259,12 @@ ngưỡng. Thay đổi này giữ dataset và các snapshot.
    số cột. App chỉ nhận XYZ chuẩn hóa ở nhánh này, chưa tự đoán/đổi trục.
 3. Chọn epoch mỗi model/vòng và LR; **Lưu thiết lập adaptation**. Cấu hình
    đang sửa chưa được lưu sẽ khóa các nút gửi job.
-4. Bấm **Kiểm tra adapter GPU A → B**. Worker chạy inference source/target và
+4. Luồng mới: bấm **Tải, chuẩn bị adapter & kiểm tra model** ở Chuẩn bị model.
+   Có thể kiểm tra lại bằng **Kiểm tra adapter GPU A → B**. Worker chạy inference source/target và
    forward/backward trên dữ liệu nguồn cùng sample target không nhãn. Đây là
    diagnostic **0 optimizer step**, không lưu weights mới hay nhãn để train.
+   Dự án dùng giao thức mới còn kiểm tra gradient/ignore thực tế và fit
+   calibration trên toàn bộ source validation trước khi mở adaptation.
 5. Khi cả hai qua kiểm tra, bấm **Chạy vòng tiếp theo**. Worker calibration
    confidence/IoU theo class trên source validation cho A → B trước, predict
    target khi đủ mẫu, rồi hợp nhất nhãn,
@@ -322,3 +344,12 @@ hiển thị số dự đoán và số box có IoU ≥ 0.3 với nhãn nguồn. 
 đã biết thiếu mẫu, app chặn gửi lại cùng đầu vào. Chọn checkpoint tốt hơn, thêm
 source validation độc lập, hoặc chủ động thu hẹp class trước vòng đầu. Không
 lặp lại frame, hạ số mẫu tối thiểu hay lấy gold target để lấp thiếu hụt.
+## Chọn model và kiểm chứng sau tải
+
+Ở **Class & model**, chọn checkpoint theo class và đầu vào; thiếu adapter không
+còn làm checkpoint biến mất. Input chưa rõ có nhãn **chờ xác minh**.
+Ở **Chuẩn bị model**, bấm **Tải, chuẩn bị adapter & kiểm tra model** để chạy
+tác vụ nền. Bảng trạng thái cho biết bước nào đạt, chờ, lỗi hoặc thiếu code.
+Chỉ khi predict, backward, ignore và calibration đạt mới mở adaptation.
+Xem [hướng dẫn và sơ đồ chi tiết](MODEL_PREPARATION.md).
+

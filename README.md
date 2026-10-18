@@ -1,12 +1,25 @@
 # AnnoLoop MVP
 
-Ứng dụng Streamlit chạy local để thích nghi **SECOND-IoU + PV-RCNN** với point cloud chưa có nhãn. Người dùng chọn folder, chọn class, theo dõi từng vòng và giữ phiên bản nhãn phù hợp.
+Ứng dụng Streamlit chạy local để gán nhãn 3D cho point cloud chưa có nhãn bằng hai detector kiểm tra chéo (ST3D: SECOND-IoU, PV-RCNN; MMDetection3D: CenterPoint, PointPillars). Người dùng chọn folder, chọn class, theo dõi từng vòng và giữ phiên bản nhãn phù hợp.
 
 ![Giao diện AnnoLoop](docs/screenshots/overview.png)
 
-## Clone và chạy
+## Chạy nhanh bằng Docker (khuyến nghị)
 
-Repo private: tài khoản GitHub của người clone cần được cấp quyền truy cập.
+Chạy trên **GPU NVIDIA của chính bạn**; app, worker và dữ liệu đều ở máy bạn.
+
+```bash
+git clone https://github.com/Hvaa1/annoloop-mvp.git
+cd annoloop-mvp
+mkdir -p data datasets
+docker compose up -d --build      # lần đầu ~30–60 phút
+```
+
+Mở **http://localhost:8502**. Cần NVIDIA driver + NVIDIA Container Toolkit; đặt dataset vào `./datasets`
+(hoặc `ANNOLOOP_DATASETS=/duong/dan docker compose up -d`). Chi tiết, yêu cầu máy và xử lý lỗi:
+[docs/DOCKER.md](docs/DOCKER.md).
+
+## Clone và chạy không dùng Docker
 
 ```bash
 git clone https://github.com/Hvaa1/annoloop-mvp.git
@@ -87,6 +100,6 @@ bash scripts/setup.sh --ui --test
 bash scripts/check.sh
 ```
 
-Đổi cổng: `ANNOLOOP_PORT=8503 bash scripts/start_ui.sh`. Mặc định app bind localhost. Cấu hình đường dẫn qua `.env.example`; chưa có Docker nhưng backend/storage/worker đều hỗ trợ biến môi trường.
+Đổi cổng: `ANNOLOOP_PORT=8503 bash scripts/start_ui.sh`. Mặc định app bind localhost. Cấu hình đường dẫn qua `.env.example`; backend/storage/worker đều đọc biến môi trường (Docker dùng cùng cơ chế).
 
 Mã runtime bên thứ ba và ghi nhận thay đổi: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

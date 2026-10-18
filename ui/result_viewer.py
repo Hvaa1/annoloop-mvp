@@ -2,13 +2,14 @@
 from collections import Counter
 from html import escape
 from pathlib import Path
+import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 from annoloop.io import read,inside
 from components import box_plot
 from prediction_page import cloud
 
-REASONS={'unmatched':'Chưa ghép được giữa model','quality_conflict':'Bất đồng confidence/quality',
+REASONS={'unmatched':'Chưa ghép được giữa model','quality_conflict':'Một model tin, model kia không',
          'low_calibrated_quality':'Dưới ngưỡng confidence/quality','insufficient_points':'Thiếu point hỗ trợ',
          'insufficient_calibrated_evidence':'Chưa đủ bằng chứng đã calibration',
          'cross_class_conflict':'Xung đột class'}
@@ -41,6 +42,15 @@ def figure_for(accepted,ignored,points=None):
         scatter=go.Scattergl(x=points[:,0],y=points[:,1],mode='markers',name='Point cloud',
             marker=dict(size=1,color='#969eac',opacity=.4),hoverinfo='skip')
         figure=go.Figure(data=[scatter,*figure.data],layout=figure.layout)
+        if len(points):
+            # Focus on the dense cloud plus every box; sparse far returns only shrink the view.
+            low,high=np.percentile(points[:,:2],[5,95],axis=0)
+            for box in boxes:
+                centre=np.asarray(box['box'][:2],float);low=np.minimum(low,centre);high=np.maximum(high,centre)
+            middle,half=(low+high)/2,float(max(high-low))/2+5
+            figure.update_xaxes(range=[float(middle[0]-half),float(middle[0]+half)],autorange=False)
+            figure.update_yaxes(range=[float(middle[1]-half),float(middle[1]+half)],autorange=False,scaleanchor='x',scaleratio=1)
+            figure.update_layout(height=600)
     figure.update_layout(uirevision='saved_result_bev')
     return figure
 

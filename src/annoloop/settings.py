@@ -6,6 +6,8 @@ from pathlib import Path
 ROOT = Path(os.getenv("ANNOLOOP_ROOT", Path(__file__).resolve().parents[2])).expanduser().resolve()
 # Folder picker starts at this standalone checkout, never at its parent's workspace.
 WORKSPACE = ROOT
+# Folder picker root; Docker points this at the mounted datasets folder.
+BROWSE_ROOT = Path(os.getenv("ANNOLOOP_BROWSE_ROOT", ROOT)).expanduser().resolve()
 
 
 @dataclass(frozen=True)

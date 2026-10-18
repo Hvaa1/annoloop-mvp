@@ -7,7 +7,7 @@ from annoloop.io import read
 from annoloop.previews import inference_progress
 from annoloop.resume import options as resume_options
 from annoloop.pseudo_memory import MemoryPolicy
-from components import hero, tail
+from components import hero, tail, live_fragment
 from round_status import selection_status
 
 
@@ -21,6 +21,10 @@ def page(store, settings, project):
     hero('VÒNG ADAPTATION', 'Chọn model, kiểm tra rồi chạy.',
          'A và B chạy lần lượt. Mỗi vòng lưu nhãn, checkpoint và sample cố định để bạn xem hoặc quay lại.')
     pid = project['id']
+    from annoloop.preparation_jobs import active as preparing
+    if preparing(store,pid):
+        st.info('Model đang tải/chuẩn bị/kiểm chứng. Theo dõi tại bước 3 · Chuẩn bị model; chưa chạy vòng adaptation.')
+        return
     a, b, c = st.columns(3)
     a.metric('Vòng hoàn tất', f"{len(project['completed_rounds'])}/{project['max_rounds']}")
     b.metric('Huấn luyện', 'Từng vòng' if project['execution_mode'] == 'manual' else 'Tự động')
@@ -36,8 +40,15 @@ def page(store, settings, project):
     selection_status(store, project)
     st.markdown('<div class="flow"><span>Calibration nguồn A → B</span><span>Predict A → B</span><span>Nhãn chung</span>'
                 '<span>Train A → B</span><span>Sample & chọn vòng</span></div>', unsafe_allow_html=True)
-    check = adaptation.readiness(store, pid)
+    check = adaptation.readiness(store, pid, fast=True)
     config = check['config']
+    if check.get('implementation_missing'):
+        st.info('Model đã có thể tải/bind nhưng recipe chưa đủ để train adaptation. '
+                'Đây là bước thiếu code, không phải kiểm tra GPU đang chờ. '
+                'Xem checklist ở Chuẩn bị model; kiểm tra lại không tự bổ sung trainer. '
+                'Bạn có thể giữ các checkpoint này và sửa lựa chọn ở bước 2 nếu muốn dùng recipe native hiện có.')
+        if st.button('Xem thành phần adapter còn thiếu →',key='missing_recipe_'+pid):
+            st.session_state['pending_navigation']='Huấn luyện nguồn';st.rerun()
     active_path = adaptation.active_job(store, pid)
     active = bool(active_path)
     st.session_state[f'adaptation_waiting_{pid}'] = active_path
@@ -87,7 +98,8 @@ def page(store, settings, project):
                                 value=config.get('coordinates_confirmed', False), key=f'adapt_axes_{pid}', disabled=active)
         columns = st.columns(3)
         bin_columns = columns[0].selectbox('BIN · số cột mỗi điểm', [4, 3, 5],
-                    index=[4, 3, 5].index(config.get('bin_columns', 4)), key=f'adapt_bin_{pid}', disabled=active)
+                    index=[4, 3, 5].index(config.get('bin_columns', 4)), key=f'adapt_bin_{pid}', disabled=active,
+                    help='KITTI Velodyne là 4 cột x, y, z, intensity. BIN có khai báo format sẽ được đối chiếu trước kiểm tra GPU. PCD đọc header, không dùng số cột BIN.')
         epochs = columns[1].number_input('Epoch mỗi model / vòng', min_value=1, max_value=200,
                     value=config.get('epochs', 1), key=f'adapt_epochs_{pid}', disabled=active)
         learning_rate = columns[2].number_input('Learning rate adaptation', min_value=.000001,
@@ -213,8 +225,15 @@ def page(store, settings, project):
     monitor(store.path(pid))
 
 
-@st.fragment(run_every=5)
 def monitor(project_root):
+    waiting = st.session_state.get(f'adaptation_waiting_{project_root.name}')
+    jobs = (project_root / 'adaptation_jobs').glob('*/state.json')
+    live = bool(waiting) or any(adaptation.job_status(p.parent)['process_alive'] for p in jobs)
+    _monitor(project_root, live=live)
+
+
+@live_fragment(5)
+def _monitor(project_root):
     waiting_key = f'adaptation_waiting_{project_root.name}'
     waiting = st.session_state.get(waiting_key)
     if waiting and not adaptation.job_status(waiting)['process_alive']:
@@ -262,10 +281,14 @@ def monitor(project_root):
         if runs:
             path = runs[0]
             progress = read(path)
-            st.progress(progress['epoch_completed'] / progress['epochs'],
-                        text=f"{path.relative_to(project_root / 'work').parts[0]} · {path.parent.name} · epoch {progress['epoch_completed']}/{progress['epochs']}")
+            epochs = max(int(progress.get('epochs') or 1), 1)
+            # Native trainers write epoch_completed; older MMDet workers write the running epoch.
+            done = int(progress.get('epoch_completed', max(int(progress.get('epoch', 1)) - 1, 0)))
+            label = f"epoch {done}/{epochs}" + (f" · đang chạy epoch {progress['epoch']}" if 'epoch' in progress and progress.get('status') == 'running' else '')
+            st.progress(min(1., done / epochs),
+                        text=f"{path.relative_to(project_root / 'work').parts[0]} · {path.parent.name} · {label}")
             a, b, c = st.columns(3)
-            a.metric('Optimizer steps', progress['optimizer_steps'])
+            a.metric('Optimizer steps', progress.get('optimizer_steps', 0))
             b.metric('Source loss', f"{progress.get('source_loss', 0):.4f}")
             c.metric('Target loss', f"{progress.get('target_loss', 0):.4f}")
             st.code(tail(path.parent / 'train.log'), language='log', height=180)

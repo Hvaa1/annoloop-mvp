@@ -2,15 +2,13 @@
 import argparse
 from datetime import datetime
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
 import sys
 import time
 
-HERE = Path(__file__).resolve().parents[3]
-DATA = Path(os.getenv("ANNOLOOP_DATA_DIR", HERE/"data")).expanduser().absolute()
+HERE = Path(__file__).resolve().parent
 ANSI = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 
 
@@ -78,8 +76,8 @@ def read_log(path):
 
 def snapshot(run=None, logs=None, total_steps=None):
     if run is None and not logs:
-        latest = read_json(DATA/'monitor/latest_training.json')
-        run = Path(latest['run']) if latest else DATA/'monitor/no_run'
+        latest = read_json(HERE/'outputs/latest_training.json')
+        run = Path(latest['run']) if latest else HERE/'outputs/day14_dual_detector_v1'
     run = Path(run).resolve() if run else None
     training = read_json(run/'training.json') if run else {}
     pipeline = read_json(run/'pipeline.json') if run else {}

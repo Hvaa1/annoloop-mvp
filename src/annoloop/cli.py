@@ -54,7 +54,7 @@ def main(argv=None):
     settings = Settings.load()
     store = ProjectStore(settings.data)
     if options.action == "doctor":
-        result = dict(python=str(settings.python), cuda=probe(settings.trainer_python),
+        result = dict(python=str(settings.python), cuda=probe(settings.python),
                       training_launcher=str(settings.training_launcher), data=str(settings.data))
     elif options.action == "inspect":
         result = inspect_dataset(options.dataset)

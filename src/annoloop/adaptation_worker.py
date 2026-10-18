@@ -32,6 +32,8 @@ def run(root):
     inventory = store.verify_dataset(pid)
     frames = [f for f in inventory['frames'] if f['split'] == 'adaptation']
     config = spec['config']
+    from .point_format import verification_contract
+    point_contract=verification_contract(spec['dataset_sha256'],config,frames)
     for model in config['models'].values():
         if digest(model['path']) != model['checkpoint_sha256'] or digest(model['config']) != model['config_sha256']:
             raise ValueError('Checkpoint/config identity thay đổi sau dispatch')
@@ -42,12 +44,14 @@ def run(root):
         checked = plan(store, pid, continuation['work'])
         if checked != continuation:
             raise ValueError('Artifacts cần tiếp tục đã đổi sau dispatch')
-    adapters = {key: NativeDetectorAdapter(model, classes, frames, root / key, settings, config['bin_columns'])
+    from .detector_factory import create
+    adapters = {key: create(model, classes, frames, root / key, settings, config['bin_columns'],read(project_root/'setup.json'))
                 for key, model in config['models'].items()}
     if continuation:
         for adapter in adapters.values():
             adapter.reuse_job = Path(continuation['job'])
     if spec['mode'] == 'verify':
+        preparation_checks={}
         with lock(settings.data / '.gpu.lock', blocking=False):
             for key in ('A', 'B'):
                 gpu_idle()
@@ -59,18 +63,32 @@ def run(root):
                 state = read(root / 'state.json')
                 state.update(active_detector=key, stage='verify_native_gpu')
                 write(root / 'state.json', state)
-                command = [str(settings.trainer_python), '-u', '-m', 'annoloop.native_training',
+                command = [str(getattr(adapters[key],'settings',settings).trainer_python), '-u', '-m',
+                           getattr(adapters[key],'worker_module','annoloop.native_training'),
                            '--verify', '--run', str(directory)]
                 adapters[key].call(command, directory / 'verification.log')
                 if read(directory / 'verified.json')['optimizer_steps'] != 0:
                     raise ValueError('Verification không được optimizer step')
                 gpu_idle()
+                if config.get('preparation_protocol')==1:
+                    from .fusion import calibrate_source
+                    state=read(root/'state.json');state.update(stage='calibrate_source_validation',active_detector=key)
+                    write(root/'state.json',state)
+                    records=adapters[key].predict_source_validation(config['models'][key]['path'])
+                    calibration=calibrate_source(records,config['models'][key]['checkpoint_sha256'],
+                        config.get('adaptation_classes',classes))
+                    calibration_path=root/key/'calibration.json';write(calibration_path,calibration)
+                    preparation_checks[key]=dict(verification=str(directory/'verified.json'),
+                        verification_sha256=digest(directory/'verified.json'),calibration=str(calibration_path),
+                        calibration_sha256=digest(calibration_path))
+                    gpu_idle()
             write(project_root / 'native_verified.json', dict(
                 models={k: {f: m[f] for f in ('checkpoint_sha256', 'config_sha256', 'runtime')}
                         for k, m in config['models'].items()}, source_evidence=spec['source_evidence'],
-                point_contract=dict(dataset_sha256=spec['dataset_sha256'], bin_columns=config['bin_columns'],
-                                    coordinates_confirmed=config['coordinates_confirmed']),
-                optimizer_steps=0, checked_at=now(), artifacts=str(root)))
+                point_contract=point_contract,
+                optimizer_steps=0, checked_at=now(), artifacts=str(root),
+                preparation_protocol=config.get('preparation_protocol'),preparation_checks=preparation_checks,
+                adaptation_classes=config.get('adaptation_classes',classes)))
     else:
         controller = RoundController(store, pid, adapters, {k: m['path'] for k, m in config['models'].items()},
             lambda frame: load_xyz(frame['media'], config['bin_columns']), epochs=config['epochs'],

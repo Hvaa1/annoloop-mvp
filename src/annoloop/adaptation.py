@@ -1,11 +1,13 @@
 """Persistent native adaptation setup, checks and background dispatch."""
+from copy import deepcopy
+import json
 import os
 import signal
 from pathlib import Path
 import subprocess
 import uuid
 import yaml
-from .io import read, write, digest, now, lock
+from .io import read, write, digest, display_digest, now, lock
 from .inspection import checkpoint_choices
 from .reused.training_monitor import process_identity
 from .runtime import require_runtime, worker_environment
@@ -60,7 +62,7 @@ def model_choices(store, pid, settings):
 
 
 def save_setup(store, pid, settings, selected, coordinates_confirmed, bin_columns=4,
-               epochs=1, learning_rate=.0001, source_weight=.5, adaptation_classes=None, memory_policy=None, model_selection=None):
+               epochs=1, learning_rate=.0001, source_weight=.5, adaptation_classes=None, memory_policy=None, model_selection=None, preparation_protocol=None,mmdet_input_mode=None):
     if type(epochs) is not int or epochs < 1 or not 0 < learning_rate <= .01 or not 0 < source_weight <= 1:
         raise ValueError('Epoch/LR/source weight không hợp lệ')
     if bin_columns not in (3, 4, 5):
@@ -74,6 +76,9 @@ def save_setup(store, pid, settings, selected, coordinates_confirmed, bin_column
     from .pseudo_memory import MemoryPolicy
     memory = asdict(MemoryPolicy(**(memory_policy or {})))
     choices = model_choices(store, pid, settings)
+    old_config=read(store.path(pid)/'adaptation.json') if (store.path(pid)/'adaptation.json').exists() else {}
+    input_mode=mmdet_input_mode or old_config.get('mmdet_input_mode','strict')
+    if input_mode not in ('strict','current_scan_only'):raise ValueError('MMDet input mode không hợp lệ')
     models = {}
     for key in ARCHITECTURES:
         candidate = next((c for c in choices[key] if c['path'] == selected.get(key)), None)
@@ -83,16 +88,23 @@ def save_setup(store, pid, settings, selected, coordinates_confirmed, bin_column
                 validate_cache(settings.data,candidate)
             models[key] = dict(candidate, checkpoint_sha256=digest(candidate['path']),
                                config_sha256=digest(candidate['config']))
+            if models[key].get('mmdet_recipe'):
+                from .mmdet_recipe import effective
+                models[key]['mmdet_recipe']=effective(models[key]['mmdet_recipe'],input_mode)
         elif selected.get(key):
             raise ValueError('Model '+key+' không còn trong danh sách; chọn lại checkpoint')
     document = dict(models=models, coordinates_confirmed=bool(coordinates_confirmed),
                     bin_columns=bin_columns, epochs=epochs, learning_rate=learning_rate,
                     source_weight=source_weight, adaptation_classes=chosen, tracking_mode='off',
                     memory_policy=memory, saved_at=now())
+    if input_mode!='strict' or 'mmdet_input_mode' in old_config:document['mmdet_input_mode']=input_mode
     with lock(store.path(pid) / '.adaptation_dispatch.lock'):
         if execution_busy(store, pid):
             raise ValueError('Chờ adaptation/check GPU hiện tại dừng trước khi sửa cấu hình')
         old_path = store.path(pid) / 'adaptation.json'
+        if preparation_protocol is not None:document['preparation_protocol']=preparation_protocol
+        elif old_path.exists() and 'preparation_protocol' in read(old_path):
+            document['preparation_protocol']=read(old_path)['preparation_protocol']
         if model_selection is not None:
             document['model_selection']=model_selection
         elif old_path.exists() and 'model_selection' in read(old_path):
@@ -107,7 +119,7 @@ def save_setup(store, pid, settings, selected, coordinates_confirmed, bin_column
     return document
 
 
-def save_model_selection(store,pid,settings,selection):
+def save_model_selection(store,pid,settings,selection,mmdet_input_mode=None):
     """One durable model selection for choose/prepare/adapt; no download or worker."""
     if set(selection)!={'A','B'}:raise ValueError('Chọn model cho cả A và B')
     from .model_hub import load_catalog,model_root
@@ -158,7 +170,9 @@ def save_model_selection(store,pid,settings,selection):
         raise ValueError('Dự án đã có vòng hoàn tất; tạo dự án mới để đổi model gốc')
     return save_setup(store,pid,settings,paths,old.get('coordinates_confirmed',False),
         old.get('bin_columns',4),old.get('epochs',1),old.get('learning_rate',.0001),old.get('source_weight',.5),
-        old.get('adaptation_classes'),old.get('memory_policy'),model_selection=selection)
+        old.get('adaptation_classes'),old.get('memory_policy'),model_selection=selection,
+        preparation_protocol=old.get('preparation_protocol') if store.get(pid)['completed_rounds'] else 1,
+        mmdet_input_mode=mmdet_input_mode)
 
 
 def models_path(setup,key):
@@ -173,15 +187,39 @@ def checkpoint_origin(path,source):
             or metadata.get('transfer',{}).get('initial_checkpoint_sha256')==source['sha256'])
 
 
+_FINISHED_CHILDREN = {}
+
+
+def _child_receipts(root, finished):
+    """Child *.process.json receipts. A finished job with a dead controller creates no new
+    children, so its listing is reused; every child's liveness is still checked by the caller."""
+    key = str(root)
+    if finished and key in _FINISHED_CHILDREN:
+        return _FINISHED_CHILDREN[key]
+    children = [read(p) for d in ('*', '*/*', '*/*/*', '*/*/*/*', '*/*/*/*/*') for p in root.glob(d + '.process.json')]
+    if finished:
+        if len(_FINISHED_CHILDREN) > 512:
+            _FINISHED_CHILDREN.clear()
+        _FINISHED_CHILDREN[key] = children
+    else:
+        _FINISHED_CHILDREN.pop(key, None)
+    return children
+
+
 def job_status(root):
     root = Path(root)
     state = read(root / 'state.json')
     alive = bool(state.get('process_start') and process_identity(state.get('pid')) == state['process_start'])
-    children = [read(p) for p in root.glob('**/*.process.json')]
-    children_alive = any(c.get('process_start') and process_identity(c.get('pid')) == c['process_start'] for c in children)
-    from .jobs import process_alive
-    children_alive = children_alive or any(process_alive(p.parent)
-                    for p in (root.parents[1] / 'work').glob('M*/**/[AB]/training.json'))
+    children_alive = False
+    if not alive:
+        # Children only matter for orphan detection; a live controller already means a live job.
+        finished = state.get('status') not in ('starting', 'running')
+        children = _child_receipts(root, finished)
+        children_alive = any(c.get('process_start') and process_identity(c.get('pid')) == c['process_start'] for c in children)
+        from .jobs import process_alive
+        work = root.parents[1] / 'work'
+        children_alive = children_alive or any(process_alive(p.parent) for pattern in ('M*/attempts/*/[AB]/training.json', 'M*/[AB]/training.json')
+                        for p in work.glob(pattern))
     if not alive and children_alive:
         state = dict(state, status='orphaned_worker', error='Controller đã dừng nhưng worker còn sống; cần ngắt worker trước khi chạy lại')
     elif state['status'] in ('starting', 'running') and not alive:
@@ -200,7 +238,8 @@ def execution_busy(store,pid):
     """Guard configuration/dispatch without changing A/B monitor's job contract."""
     from .local_ensemble import active as ensemble_active
     from .final_delivery import active as delivery_active
-    return bool(active_job(store,pid) or ensemble_active(store,pid) or delivery_active(store,pid))
+    from .preparation_jobs import active as preparation_active
+    return bool(active_job(store,pid) or ensemble_active(store,pid) or delivery_active(store,pid) or preparation_active(store,pid))
 
 
 def stop_job(root):
@@ -219,6 +258,27 @@ def stop_job(root):
             stop(path.parent)
         return True
     return False
+
+
+_CALIBRATION = {}
+
+
+def _calibration_summary(path, chosen):
+    """Small summary of a source-validation result; multi-MB JSON is re-read only when it changes."""
+    from .io import file_signature
+    from .fusion import source_calibration_report
+    key = (str(path), file_signature(path), file_signature(path.parent / 'spec.json'), tuple(chosen))
+    if key not in _CALIBRATION:
+        spec, result = read(path.parent / 'spec.json'), read(path)
+        records = result.get('calibration_records')
+        report = source_calibration_report(records, chosen) if records else None
+        summary = {k: result.get(k) for k in ('checkpoint_sha256', 'domain')}
+        summary['frames'] = len(result.get('frames', []))
+        if len(_CALIBRATION) > 64:
+            _CALIBRATION.clear()
+        _CALIBRATION[key] = (spec, summary, report)
+    spec, summary, report = _CALIBRATION[key]
+    return deepcopy(spec), dict(summary), deepcopy(report)
 
 
 def calibration_reports(store, pid, models, source_evidence):
@@ -247,8 +307,8 @@ def calibration_reports(store, pid, models, source_evidence):
             results = sorted((job_path.parent / key / 'source').glob('*/result.json'),
                              key=lambda p: p.stat().st_mtime, reverse=True)
             for path in results:
-                spec = read(path.parent / 'spec.json')
-                result = read(path)
+                chosen = read(root / 'adaptation.json').get('adaptation_classes', project['schema']['classes'])
+                spec, result, report = _calibration_summary(path, chosen)
                 if (spec.get('checkpoint_sha256') != expected.get(key)
                     or spec.get('config_sha256') != model['config_sha256']
                     or spec.get('runtime') != model['runtime']
@@ -258,26 +318,58 @@ def calibration_reports(store, pid, models, source_evidence):
                     or result.get('checkpoint_sha256') != expected.get(key)
                     or result.get('domain') != 'source_validation'):
                     continue
-                records = result.get('calibration_records')
-                if not records:
+                if report is None:
                     continue
-                chosen = read(root / 'adaptation.json').get('adaptation_classes', project['schema']['classes'])
-                report = source_calibration_report(records, chosen)
                 reports[key] = dict(report, path=str(path), checkpoint_sha256=expected[key],
-                                    source_frames=len(result['frames']), score_threshold=.05)
+                                    source_frames=result['frames'], score_threshold=.05)
                 break
         if len(reports) == len(models):
             break
     return reports
 
 
-def readiness(store, pid):
+def _point_contract(root, project, config):
+    from .point_format import verification_contract
+    return verification_contract(project['dataset_sha256'], config,
+        [f for f in read(root / 'dataset.json')['frames'] if f['split'] == 'adaptation'])
+
+
+_CONTRACTS = {}
+
+
+def _display_contract(root, project, config):
+    """Page-view cache: per-frame stats are slow on mounted drives; dispatch recomputes."""
+    from .io import file_signature
+    fields = ('bin_columns', 'coordinates_confirmed', 'mmdet_input_mode')
+    key = (str(root), project['dataset_sha256'], file_signature(root / 'dataset.json'),
+           json.dumps({k: config.get(k) for k in fields}, sort_keys=True))
+    cached = _CONTRACTS.get(key)
+    if cached:
+        contract, formats = cached
+        try:
+            if all(file_signature(path) == signature for path, signature in formats.items()):
+                return deepcopy(contract)
+        except OSError:
+            pass
+    contract = _point_contract(root, project, config)
+    formats = {path: file_signature(path) for path in contract.get('input_formats', {})}
+    if len(_CONTRACTS) >= 32:
+        _CONTRACTS.clear()
+    _CONTRACTS[key] = (deepcopy(contract), formats)
+    return contract
+
+
+def readiness(store, pid, fast=False):
+    """fast=True is for page views: file hashes are reused until file identity changes."""
+    hasher = display_digest if fast else digest
     root = store.path(pid)
     project = store.get(pid)
     path = root / 'adaptation.json'
     config = read(path) if path.exists() else dict(models={}, coordinates_confirmed=False)
+    profile = None
     blockers = []
     non_native = False
+    implementation_missing = False
     if project['schema']['data_type'] != '3d':
         blockers.append('Detector 2D chưa có adapter')
     for key, arch in ARCHITECTURES.items():
@@ -290,10 +382,20 @@ def readiness(store, pid):
         else:
             from .hub_selection import blockers as hub_blockers
             reasons=hub_blockers(model,config.get('adaptation_classes',project['schema']['classes']))
+            if model.get('backend','native_st3d')!='native_st3d':
+                recipe=model.get('mmdet_recipe')
+                implementation_missing=implementation_missing or not (model.get('framework')=='mmdetection3d' and recipe and recipe.get('implementation_supported'))
+                if recipe:
+                    from .model_filter import dataset_profile
+                    from .mmdet_recipe import input_blockers
+                    if profile is None:
+                        profile=dataset_profile([f for f in read(root/'dataset.json')['frames'] if f['split']=='adaptation'])
+                    reasons=input_blockers(recipe,profile)+reasons
+                    reasons=list(dict.fromkeys(reasons))
             non_native=non_native or bool(reasons)
             blockers.extend(f'Detector {key}: '+reason for reason in reasons)
             for field, hash_key in (('path', 'checkpoint_sha256'), ('config', 'config_sha256')):
-                if not Path(model[field]).is_file() or digest(model[field]) != model[hash_key]:
+                if not Path(model[field]).is_file() or hasher(model[field]) != model[hash_key]:
                     blockers.append(f'Detector {key}: checkpoint/config đã thay đổi, chọn lại')
     if not config.get('coordinates_confirmed'):
         blockers.append('Xác nhận target: mét, X trước / Y trái / Z lên trong hệ LiDAR')
@@ -303,21 +405,29 @@ def readiness(store, pid):
     source_evidence = read(evidence_path).get('source_evidence', {}) if evidence_path.exists() else {}
     source_valid = bool(source_evidence)
     for evidence in source_evidence.values():
-        if not Path(evidence['path']).is_file() or digest(evidence['path']) != evidence['sha256']:
+        if not Path(evidence['path']).is_file() or hasher(evidence['path']) != evidence['sha256']:
             source_valid = False
     if not source_valid:
         blockers.append('Source infos train/validation thiếu hoặc đã thay đổi; chuẩn bị lại nguồn')
     expected = {key: {k: value[k] for k in ('checkpoint_sha256', 'config_sha256', 'runtime')}
                 for key, value in config['models'].items()}
+    try:
+        input_contract=(_display_contract if fast else _point_contract)(root,project,config)
+    except (ValueError,OSError) as error:
+        input_contract=None
+        blockers.append('Point cloud target: '+str(error))
     gpu_verified = bool(not non_native and verified.get('models') == expected and len(expected) == 2
                         and verified.get('source_evidence') == source_evidence and source_valid
-                        and verified.get('point_contract') == dict(dataset_sha256=project['dataset_sha256'],
-                            bin_columns=config.get('bin_columns'), coordinates_confirmed=config.get('coordinates_confirmed'))
+                        and input_contract is not None and verified.get('point_contract') == input_contract
                         and verified.get('optimizer_steps') == 0)
-    if not gpu_verified:
+    if not gpu_verified and not non_native:
         blockers.append('Chạy kiểm tra adapter GPU A → B trước khi train adaptation')
     can_check = not [b for b in blockers if not b.startswith('Chạy kiểm tra')]
-    reports = calibration_reports(store, pid, {k:m for k,m in config['models'].items() if m.get('backend','native_st3d')=='native_st3d'}, source_evidence)
+    if (config.get('preparation_protocol')==1 or any(m.get('mmdet_recipe') for m in config['models'].values())) and not non_native:
+        from .preparation import certificate_valid
+        if not gpu_verified or not certificate_valid(root,verified,config,hasher):
+            blockers.append('Kiểm chứng sau chuẩn bị chưa đạt đủ predict / backward / ignore / calibration. Mở Chuẩn bị model để kiểm tra.')
+    reports = calibration_reports(store, pid, {k:m for k,m in config['models'].items() if m.get('backend','native_st3d')=='native_st3d' or m.get('mmdet_recipe',{}).get('implementation_supported')}, source_evidence)
     for key, report in reports.items():
         for row in report['classes']:
             if not row['enough_samples']:
@@ -327,7 +437,7 @@ def readiness(store, pid):
                                 'Cần checkpoint tốt hơn hoặc thêm source validation độc lập.')
     return dict(config=config, blockers=blockers, gpu_verified=gpu_verified,
                 can_check=can_check, ready=not blockers, source_evidence=source_evidence,
-                calibration_reports=reports)
+                calibration_reports=reports,implementation_missing=bool(implementation_missing))
 
 
 def start_job(store, pid, settings, mode='run', retry=False, resume_from=None):

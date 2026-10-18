@@ -45,6 +45,9 @@ class HubAdaptationTest(unittest.TestCase):
         ready=adaptation.readiness(self.store,self.pid)
         self.assertFalse(ready['ready']);self.assertFalse(ready['can_check'])
         self.assertTrue(any('chưa nối train target' in b for b in ready['blockers']))
+        self.assertTrue(ready['implementation_missing'])
+        self.assertFalse(any('Chạy kiểm tra adapter GPU' in b or 'Kiểm chứng sau chuẩn bị' in b
+                             or 'Chưa kiểm chứng forward/backward' in b for b in ready['blockers']))
     def test_forged_native_receipt_cannot_unlock_framework_training(self):
         config=self.configure()
         write(self.store.path(self.pid)/'native_verified.json',dict(
@@ -60,6 +63,22 @@ class HubAdaptationTest(unittest.TestCase):
         Path(self.weight).write_bytes(b'corrupt')
         with self.assertRaises(ValueError):self.configure()
         self.assertFalse((self.store.path(self.pid)/'adaptation.json').exists())
+    def test_post_download_recipe_missing_training_reports_blockers_without_gpu(self):
+        from annoloop import preparation
+        setup=read(self.store.path(self.pid)/'setup.json')
+        setup['source_counts']={split:{'car':20,'pedestrian':20} for split in ('train','validation')}
+        write(self.store.path(self.pid)/'setup.json',setup)
+        selection={k:dict(kind='hub',id=self.m['id']) for k in ('A','B')}
+        with patch('annoloop.model_hub.load_catalog',return_value={'models':[self.m]}), \
+             patch('annoloop.adaptation.start_job') as dispatch, \
+             patch('subprocess.Popen',side_effect=AssertionError('No GPU/download')):
+            adaptation.save_model_selection(self.store,self.pid,self.settings,selection)
+            report=preparation.check_prepared(self.store,self.pid,self.settings,True,4)
+            dispatch.assert_not_called()
+        self.assertEqual(report['status'],'blocked');self.assertFalse(report['ready'])
+        missing={r['stage'] for r in report['stages'] if r['status']=='missing'}
+        self.assertTrue({'Forward/backward','Signed-ignore','Calibration source'}.issubset(missing))
+        self.assertTrue((model_root(self.data,self.m['id'])/'connection.json').exists())
     def test_unknown_selection_not_silently_dropped(self):
         with self.assertRaises(ValueError):adaptation.save_setup(self.store,self.pid,self.settings,dict(A='/unknown',B=None),True)
     def test_existing_round_identity_preserved(self):

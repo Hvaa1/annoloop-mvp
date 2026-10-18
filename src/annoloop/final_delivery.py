@@ -56,7 +56,8 @@ def plan(store, pid, scope='non_holdout', ensemble_job=None):
         models=[]
         for key in ('A','B'):
             model=deepcopy(adaptation['models'][key])
-            if model.get('backend','native_st3d')!='native_st3d':
+            if model.get('backend','native_st3d')!='native_st3d' and not (
+                model.get('framework')=='mmdetection3d' and model.get('mmdet_recipe',{}).get('input_supported')):
                 raise ValueError('Final adapter chưa hỗ trợ framework này')
             reference=snapshot['checkpoints'][key]
             model.update(path=reference['path'],checkpoint_sha256=reference['sha256'],vote_group=model['architecture'])

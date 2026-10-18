@@ -1,4 +1,5 @@
 """AnnoLoop local UI. Reruns never launch work without a submitted action."""
+from html import escape
 from pathlib import Path
 import os
 import sys
@@ -16,7 +17,7 @@ from annoloop.device import probe
 from annoloop.io import read
 from annoloop.projects import ProjectStore
 from annoloop.settings import Settings
-from components import box_plot, cards, chips, empty, hero, tail
+from components import box_plot, cards, chips, empty, hero, tail, live_fragment
 from onboarding import wizard,new_project,select_project
 from inspection_page import model_inspection
 from adaptation_page import page as adaptation_ui
@@ -49,6 +50,20 @@ def model_library_page():
             local_ensemble_ui.inventory_table(local_ensemble.discover(store,current,settings))
             st.caption('Chọn để ghép tại bước 2 · Class & model → Ghép checkpoint local.')
     model_library_ui(settings,classes)
+
+
+def step_progress(project):
+    """Cheap read-only completion marks for the six workflow steps."""
+    if not project:return [False]*6
+    root=store.path(project['id']);path=root/'adaptation.json'
+    bound=read(path) if path.exists() else {}
+    ensemble=local_ensemble.configuration(store,project['id']).get('enabled')
+    delivered=any((job.parent/'result.json').is_file() for job in root.glob('delivery_jobs/*/state.json'))
+    chosen=bool(bound.get('model_selection')) or len(bound.get('models',{}))==2 or bool(ensemble)
+    # Binding two models is not preparation; require the saved GPU check receipt.
+    prepared=bool(ensemble) or len(bound.get('models',{}))==2 and (root/'native_verified.json').is_file()
+    return [(root/'setup.json').is_file(),chosen,prepared,bool(project['completed_rounds']),
+            bool(project['selected_version']),delivered]
 
 
 def navigate(name):
@@ -90,7 +105,24 @@ def overview():
 
 
 def dataset_page():
-    wizard(store, settings)
+    pid=st.session_state.get('project_id')
+    path=store.path(pid)/'setup.json' if pid else None
+    if not path or not path.is_file():
+        wizard(store, settings);return
+    # Saved project: summarise instead of re-showing an empty creation form.
+    p=store.get(pid);setup=read(path);inventory=read(store.path(pid)/'dataset.json')
+    hero('1 · DỮ LIỆU','Dữ liệu của dự án đã sẵn sàng.','Source, target và nhãn đã được lưu. Tiếp tục chọn model, hoặc mở phần dưới để tạo dự án mới từ dữ liệu khác.')
+    with st.container(border=True):
+        a,b,c=st.columns(3)
+        a.metric('Target frame',len(inventory['frames']))
+        b.metric('Box source train',sum(setup['source_counts']['train'].values()))
+        c.metric('Nhãn cần gán',len(p['schema']['classes']))
+        chips(p['schema']['classes'])
+        st.caption('Source: '+setup['source_root'])
+        st.caption('Target: '+setup['target_root'])
+    st.button('Tiếp tục: chọn model →',type='primary',on_click=navigate,args=('Class & nguồn',),key='data_continue_'+pid)
+    with st.expander('Tạo dự án mới từ dữ liệu khác'):
+        st.button('＋ Bắt đầu dự án mới',on_click=new_project,key='data_new_project_'+pid)
 
 
 def setup_for_project(p):
@@ -130,6 +162,10 @@ def source_page():
     if local_ensemble_ui.prepare(store,settings,p):return
     if prepare_native_sources(store,settings,p,setup):return
     if prepare_selected(store,settings,p):return
+    from preparation_page import panel as preparation_panel
+    saved_path=store.path(p['id'])/'adaptation.json'
+    if saved_path.exists() and not any(v.get('kind')=='hub' for v in read(saved_path).get('model_selection',{}).values()):
+        preparation_panel(store,settings,p)
     plan=setup['plan'];required=[key for key,item in plan['models'].items() if item['pretrain_required']]
     bindings_path=store.path(p['id'])/'adaptation.json'
     bindings=read(bindings_path).get('models',{}) if bindings_path.exists() else {}
@@ -160,7 +196,9 @@ def source_page():
             st.info('Chạy A → B: dừng sớm A sẽ chuyển sang B sau khi A dừng hẳn và GPU rảnh. A lỗi sẽ dừng chuỗi.')
     if not required:
         st.success('Cả hai detector đã hỗ trợ đủ nhãn bạn chọn. Không cần train nguồn lại.')
-        if st.button('Tiếp tục adaptation →',type='primary',disabled=bool(blockers)):
+        from annoloop import preparation
+        staged=read(bindings_path).get('preparation_protocol')==1 if bindings_path.exists() else False
+        if st.button('Tiếp tục adaptation →',type='primary',disabled=bool(blockers) or staged and not preparation.overview(store,p['id'],fast=True)['ready']):
             if model_plan:
                 from annoloop.adaptation import save_model_selection
                 save_model_selection(store,p['id'],settings,model_plan)
@@ -210,12 +248,16 @@ def inspection_page():
     if p:model_inspection(store,settings,p)
 
 
-@st.fragment(run_every=5)
 def monitor():
+    _monitor(live=any(jobs.process_alive(p.parent) for p in (settings.data/'jobs').glob('*/job.json')))
+
+
+@live_fragment(5)
+def _monitor():
     st.subheader('Theo dõi huấn luyện')
     paths=sorted((settings.data/'jobs').glob('*/job.json'),key=lambda p:p.stat().st_mtime,reverse=True)
     if not paths:
-        empty('Chưa có job huấn luyện', 'Khi bắt đầu, trạng thái tiến trình, epoch, loss và checkpoint sẽ xuất hiện ở đây. Tự cập nhật mỗi 5 giây.')
+        empty('Chưa có job huấn luyện', 'Khi bắt đầu, trạng thái tiến trình, epoch, loss và checkpoint sẽ xuất hiện ở đây. Tự cập nhật mỗi 5 giây khi có job đang chạy.')
         return
     labels={str(p.parent): (read(p).get('model') or jobs.model_identity(read(p).get('spec', {})))['label']
             +' · '+p.parent.name[:8] for p in paths}
@@ -385,36 +427,45 @@ with st.sidebar:
                         index=['manual','automatic'].index(selected_project['execution_mode']),format_func=lambda x:'Từng vòng' if x=='manual' else 'Tự động')
                     policy=selected_project['selection_policy']
                     selection=st.selectbox('Cách chọn phiên bản nhãn',['manual','automatic'],
-                        index=['manual','automatic'].index(policy['mode']),format_func=lambda x:'Tôi xem và chọn' if x=='manual' else 'Theo ngưỡng')
-                    agreement=st.slider('Agreement tối thiểu',0.,1.,policy['min_agreement'],.05)
+                        index=['manual','automatic'].index(policy['mode']),format_func=lambda x:'Tôi xem và chọn' if x=='manual' else 'Tự động theo luật')
+                    rules=['trend','threshold']
+                    rule=st.selectbox('Luật đồng thuận',rules,index=rules.index(policy.get('agreement_rule','trend')),
+                        format_func=lambda x:'Không giảm so với vòng đang dùng' if x=='trend' else 'Ngưỡng tuyệt đối')
+                    agreement=st.slider('Agreement tối thiểu (chỉ dùng cho ngưỡng tuyệt đối)',0.,1.,policy['min_agreement'],.05)
                     support=st.slider('Point support tối thiểu',0.,1.,policy['min_supported_fraction'],.05)
                     st.caption('Ngưỡng dùng proxy không gold; không chứng minh accuracy.')
                     submitted=st.form_submit_button('Lưu dự án')
                 if submitted:
                     try:
                         store.configure(selected_project['id'],name,int(rounds),mode,
-                            SelectionPolicy(**dict(policy,mode=selection,min_agreement=agreement,min_supported_fraction=support)))
+                            SelectionPolicy(**dict(policy,mode=selection,agreement_rule=rule,min_agreement=agreement,min_supported_fraction=support)))
                         st.rerun()
                     except ValueError as error:st.error(str(error))
     st.button('＋ Tạo dự án mới',on_click=new_project,width='stretch')
-    st.caption('WORKFLOW DỰ ÁN')
+    st.markdown('<div class="side-label">Workflow dự án</div>',unsafe_allow_html=True)
     stages=[('1 · Dữ liệu','Dữ liệu'),('2 · Class & model','Class & nguồn'),('3 · Chuẩn bị model','Huấn luyện nguồn'),('4 · Adaptation','Vòng adaptation'),('5 · Kết quả & so sánh','So sánh phiên bản'),('6 · Xuất CVAT','Xuất CVAT')]
+    progress=step_progress(store.get(st.session_state['project_id']) if st.session_state.get('project_id') else None)
     for index,(label,target) in enumerate(stages):
         selected=st.session_state['navigation']==target
+        if progress[index]:label+='  ✓'
         st.button(label,key='workflow_nav_'+str(index),on_click=navigate,args=(target,),width='stretch',type='primary' if selected else 'secondary',disabled=index>0 and not st.session_state.get('project_id'))
     with st.expander('Công cụ & hướng dẫn',expanded=False):
         st.caption('Kho model là thư viện tham khảo. Chọn model của dự án ở bước 2.')
         st.radio('Không gian làm việc',PAGES,key='navigation',label_visibility='collapsed')
     st.divider()
-    st.caption('LOCAL WORKSPACE · MVP')
-    st.caption('Source train có nhãn. Target adaptation không dùng gold. Mỗi phiên bản được lưu riêng.')
+    st.markdown('<div class="side-label">Local workspace · MVP</div><div class="side-note">Source train có nhãn. '
+                'Target adaptation không dùng gold. Mỗi phiên bản được lưu riêng.</div>',unsafe_allow_html=True)
 
 page=st.session_state['navigation']
 page_label={'Class & nguồn':'2 · CLASS & MODEL','Huấn luyện nguồn':'3 · CHUẨN BỊ MODEL','Dữ liệu':'1 · DỮ LIỆU','Vòng adaptation':'4 · ADAPTATION','So sánh phiên bản':'5 · KẾT QUẢ','Xuất CVAT':'6 · CVAT'}.get(page,page.upper())
-st.caption('ANNOLOOP  /  '+page_label)
+meta=''
 if st.session_state.get('project_id'):
     visible_project=store.get(st.session_state['project_id'])
-    st.caption(f"Dự án: {visible_project['name']} · ID {visible_project['id']} · Phiên bản đang dùng: {visible_project['selected_version'] or 'chưa chọn'}")
+    version=visible_project['selected_version']
+    meta=(f'<span>Dự án: <b>{escape(visible_project["name"])}</b> <code>{escape(visible_project["id"])}</code></span>'
+          f'<span class="{"on" if version else ""}">Phiên bản đang dùng: {escape(version or "chưa chọn")}</span>')
+st.markdown(f'<div class="pagebar"><div class="crumb">AnnoLoop / <b>{escape(page_label)}</b></div>'
+            f'<div class="meta">{meta}</div></div>',unsafe_allow_html=True)
 if message:=st.session_state.pop('flash',None):st.success(message)
 try:
     dict(zip(PAGES,[overview,dataset_page,class_page,source_page,rounds_page,compare_page,cvat_page,help_page,inspection_page,model_library_page]))[page]()

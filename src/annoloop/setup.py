@@ -4,7 +4,6 @@ Only explicit source folders are inspected for labels. Target annotations are ne
 read. Files are generated in project storage, leaving input datasets untouched.
 """
 from collections import Counter
-from importlib import import_module
 import os
 from pathlib import Path
 import pickle
@@ -21,10 +20,7 @@ from .settings import ROOT, WORKSPACE
 class SourceInfoUnpickler(pickle.Unpickler):
     def find_class(self, module, name):
         if module in ('numpy.core.multiarray', 'numpy._core.multiarray') and name in ('_reconstruct', 'scalar'):
-            # NumPy 1.26 exposes an _core compatibility stub before importing
-            # its children. Choose/import the actual module, not that stub.
-            namespace = 'numpy._core' if int(np.__version__.split('.')[0]) >= 2 else 'numpy.core'
-            return getattr(import_module(namespace + '.multiarray'), name)
+            return getattr(np._core.multiarray, name)
         if module == 'numpy' and name in ('ndarray', 'dtype'):
             return getattr(np, name)
         if module == 'numpy.dtypes':
@@ -116,7 +112,12 @@ def inspect_target(folder):
     mode=schema.data_type if schema else '3d' if counts['3d'] else '2d'
     if not counts[mode]:
         raise ValueError('Target không có media 3D hoặc ảnh được hỗ trợ')
-    return dict(root=str(root),data_type=mode,frame_count=counts[mode],classes=list(schema.classes) if schema else [])
+    result=dict(root=str(root),data_type=mode,frame_count=counts[mode],classes=list(schema.classes) if schema else [])
+    if mode=='3d':
+        from .model_filter import dataset_profile
+        paths=sorted(p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in EXTENSIONS['3d'])
+        result['point_profile']=dataset_profile([dict(frame_id=p.relative_to(root).as_posix(),media=str(p)) for p in paths])
+    return result
 
 
 def model_catalog(data, extra_folders=()):

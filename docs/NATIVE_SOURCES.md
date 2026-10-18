@@ -30,7 +30,7 @@ tự train, không đổi snapshot nhãn hoặc chứng nhận GPU đã lưu.
 Từ thư mục VIN_Ai:
 
 ```bash
-bash scripts/connect_model.sh \
+bash buildphase/annoloop_mvp/scripts/connect_model.sh \
   --native-source lsf-secondiou-waymo-source \
   --checkpoint /duong/dan/secondiou.pth
 ```

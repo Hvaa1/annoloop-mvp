@@ -203,6 +203,28 @@ class UITest(unittest.TestCase):
         self.assertTrue(self.app.error);self.assertFalse(self.app.exception)
         self.assertNotIn('quick_data',self.app.session_state)
 
+    def test_kitti_xyzi_import_keeps_source_and_never_reads_target_labels(self):
+        points=np.array([[1,2,3,.1],[4,5,6,.2],[7,8,9,.3]],dtype='<f4')
+        cloud=self.target/'001.bin';points.tofile(cloud)
+        write(self.target/'pointcloud_format.json',dict(schema_version='1.0',dtype='float32_le',
+            feature_names=['x','y','z','intensity'],files={'001.bin':dict(sha256=digest(cloud),points=3)}))
+        (self.target/'label_2').mkdir();(self.target/'label_2/001.txt').write_text('TARGET GOLD MUST NOT OPEN')
+        original=Path.open
+        def guarded(path,*args,**kwargs):
+            if path.parent.name=='label_2':raise AssertionError('Target gold opened')
+            return original(path,*args,**kwargs)
+        with patch.object(Path,'open',guarded),patch('annoloop.jobs.start_pretrain') as train,patch('annoloop.jobs.start_source_pair') as pair:
+            self.start_wizard()
+            self.assertTrue(any('Đặc trưng target:' in c.value and 'intensity' in c.value for c in self.app.caption))
+            next(b for b in self.app.button if b.label=='Lưu dữ liệu & chọn model →').click().run()
+            self.assertFalse(self.app.exception,str(self.app.exception));self.assertFalse(self.app.error,str(self.app.error))
+            store=ProjectStore(self.root/'state');project=store.list()[0]
+            self.assertEqual(read(store.path(project['id'])/'setup.json')['source_root'],str(self.source))
+            frame=read(store.path(project['id'])/'dataset.json')['frames'][0]
+            self.assertEqual(frame['feature_names'],['x','y','z','intensity'])
+            self.assertIn('point_format_evidence',frame)
+            train.assert_not_called();pair.assert_not_called()
+
     def test_new_project_clears_old_draft_and_preserves_existing_project(self):
         previous=self.create();store=ProjectStore(self.root/'state')
         root=store.path(previous['id'])
@@ -256,8 +278,8 @@ class UITest(unittest.TestCase):
             next(b for b in self.app.button if b.label=='Lưu dữ liệu & chọn model →').click().run()
             self.assertEqual(self.app.radio(key='navigation').value,'Class & nguồn')
             pid=ProjectStore(self.root/'state').list()[0]['id']
-            self.app.checkbox(key=f'workflow_compatible_{pid}').uncheck().run()
             for key in ['A','B']:self.app.selectbox(key=f'workflow_model_{pid}_{key}').set_value('hub:'+m['id'])
+            self.app.radio(key='workflow_input_mode_'+pid).set_value('current_scan_only')
             self.app.run()
             next(b for b in self.app.button if b.label=='Xác nhận model & tiếp tục →').click().run()
             self.assertFalse(self.app.exception,str(self.app.exception));self.assertFalse(self.app.error,str(self.app.error))
@@ -265,7 +287,23 @@ class UITest(unittest.TestCase):
             root=self.root/'state/projects'/pid;config=read(root/'adaptation.json')
             self.assertEqual(config['model_selection'],{k:dict(kind='hub',id=m['id']) for k in ['A','B']})
             self.assertEqual(config['models'],{})
+            self.assertEqual(config['preparation_protocol'],1)
+            self.assertEqual(config['mmdet_input_mode'],'current_scan_only')
+            self.assertTrue(next(b for b in self.app.button if b.label=='Mở vòng adaptation →').disabled)
+            self.assertTrue(any('Trạng thái' in d.value.columns and (d.value['Trạng thái']=='Thiếu code recipe').any() for d in self.app.dataframe))
             self.app.run();download.assert_not_called()
+            with patch('annoloop.preparation_jobs.start',return_value='fixture preparation job') as prepare:
+                self.app.run();prepare.assert_not_called()
+                next(c for c in self.app.checkbox if c.label=='Target dùng mét; X trước, Y trái, Z lên').check()
+                next(b for b in self.app.button if b.label=='Lưu chế độ đầu vào').click().run()
+                prepare.assert_not_called()
+                self.assertEqual(read(root/'adaptation.json')['mmdet_input_mode'],'current_scan_only')
+                config=read(root/'adaptation.json')
+                next(b for b in self.app.button if b.label=='Tải, chuẩn bị adapter & kiểm tra model').click().run()
+                self.assertFalse(self.app.exception,str(self.app.exception))
+                prepare.assert_called_once()
+                self.assertEqual(prepare.call_args.args[-1],'current_scan_only')
+                self.app.run();prepare.assert_called_once()
             self.app.button(key='workflow_nav_3').click().run()
             self.assertFalse(self.app.exception,str(self.app.exception))
             self.assertFalse(any('workflow_model_' in (s.key or '') or 'adapt_model_' in (s.key or '') for s in self.app.selectbox))
@@ -277,6 +315,7 @@ class UITest(unittest.TestCase):
         p=self.create();pid=p['id'];store=ProjectStore(self.root/'state')
         from test_model_hub import model
         m=dict(model(),framework='mmdetection3d',architecture='CenterPoint',modality='point_cloud')
+        m['input_contract']=dict(features=['x','y','z','intensity'],sweeps=1,evidence=[m['config_path']])
         native={}
         for key,arch in [('A','SECONDNetIoU'),('B','PVRCNN')]:
             cfg=self.root/(key+'_filter.yaml')
@@ -362,7 +401,7 @@ class UITest(unittest.TestCase):
 
     def test_rejected_first_round_explains_threshold_and_manual_override(self):
         p=self.create();store=ProjectStore(self.root/'state');pid=p['id']
-        store.configure(pid,p['name'],3,'automatic',SelectionPolicy(mode='automatic'))
+        store.configure(pid,p['name'],3,'automatic',SelectionPolicy(mode='automatic',agreement_rule='threshold'))
         weight=self.root/'fixture.pth';weight.write_bytes(b'test only')
         box=dict(id='car1',class_name='car',box=[4.,0.,0.,4.,2.,2.,0.],score=.9)
         labels=dict(target_gold_read=False,frames=[dict(frame_id='001',boxes=[box])])
@@ -460,7 +499,7 @@ class UITest(unittest.TestCase):
         store=SimpleNamespace(get=lambda _:dict(stale,completed_rounds=['M1']))
         with patch.object(prediction_page.st,'rerun',side_effect=RuntimeError('refresh completed round')) as rerun:
             with self.assertRaisesRegex(RuntimeError,'refresh completed round'):
-                prediction_page.saved_predictions.__wrapped__(store,stale)
+                prediction_page._saved_predictions.__wrapped__(store,stale)
             rerun.assert_called_once_with(scope='app')
 
     def test_folder_picker_exists_for_source_and_target(self):
@@ -567,6 +606,8 @@ class UITest(unittest.TestCase):
             self.assertTrue(next(b for b in self.app.button if b.label=='Kiểm tra adapter GPU A → B').disabled)
             self.assertTrue(next(b for b in self.app.button if b.label=='Chạy vòng tiếp theo').disabled)
             self.assertTrue(any('chưa nối train target' in w.value for w in self.app.warning))
+            self.assertTrue(any('Đây là bước thiếu code' in w.value for w in self.app.info))
+            self.assertFalse(any('Chạy kiểm tra adapter GPU A → B trước' in w.value for w in self.app.warning))
             self.assertFalse(any(s.key==f'adapt_model_{pid}_A' for s in self.app.selectbox))
             start.assert_not_called()
 
@@ -663,7 +704,7 @@ class UITest(unittest.TestCase):
              patch('annoloop.adaptation.job_status',return_value={'process_alive':False}), \
              patch('annoloop.adaptation.start_job') as start:
             with self.assertRaisesRegex(RuntimeError,'full app refresh'):
-                adaptation_page.monitor.__wrapped__(Path('/fixture_project'))
+                adaptation_page._monitor.__wrapped__(Path('/fixture_project'))
             rerun.assert_called_once_with(scope='app')
             self.assertNotIn(waiting_key,session)
             start.assert_not_called()

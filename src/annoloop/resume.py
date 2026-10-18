@@ -27,7 +27,7 @@ def plan(store, pid, work):
     evidence = read(root / 'setup.json')['source_evidence']
     if old['source_evidence'] != evidence:
         raise ValueError('Source infos đã đổi; không tiếp tục nhãn/checkpoint cũ')
-    for field in ('coordinates_confirmed', 'bin_columns', 'epochs', 'learning_rate', 'source_weight', 'tracking_mode'):
+    for field in ('coordinates_confirmed', 'bin_columns', 'epochs', 'learning_rate', 'source_weight', 'tracking_mode','mmdet_input_mode'):
         if old['config'].get(field) != current.get(field):
             raise ValueError('Thiết lập đã đổi: ' + field)
     classes = project['schema']['classes']

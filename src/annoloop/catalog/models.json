@@ -907,7 +907,7 @@
     },
     {
       "id": "mmdet3d-a4f12c990b6cc4b8",
-      "name": "pointpillars_hv_regnet-400mf_fpn_sbn-all_8xb4-2x_nus-3d",
+      "name": "pointpillars_hv_fpn_head-free-anchor_sbn-all_8xb4-2x_nus-3d",
       "architecture": "FreeAnchor",
       "framework": "mmdetection3d",
       "dataset": "nuScenes",
@@ -926,11 +926,11 @@
       "data_type": "3d",
       "modality": "point_cloud",
       "weights_url": "https://download.openmmlab.com/mmdetection3d/v1.0.0_models/free_anchor/hv_pointpillars_fpn_sbn-all_free-anchor_4x8_2x_nus-3d/hv_pointpillars_fpn_sbn-all_free-anchor_4x8_2x_nus-3d_20210816_163441-ae0897e7.pth",
-      "config_path": "configs/regnet/pointpillars_hv_regnet-400mf_fpn_sbn-all_8xb4-2x_nus-3d.py",
+      "config_path": "configs/free_anchor/pointpillars_hv_fpn_head-free-anchor_sbn-all_8xb4-2x_nus-3d.py",
       "config_files": {
-        "configs/regnet/pointpillars_hv_regnet-400mf_fpn_sbn-all_8xb4-2x_nus-3d.py": {
-          "url": "https://raw.githubusercontent.com/open-mmlab/mmdetection3d/fe25f7a51d36e3702f961e198894580d83c4387b/configs/regnet/pointpillars_hv_regnet-400mf_fpn_sbn-all_8xb4-2x_nus-3d.py",
-          "sha256": "017bf03a7dd44002e203942e1e2f0b12d23a86e6d0a4584319b3926c499aa4dd"
+        "configs/free_anchor/pointpillars_hv_fpn_head-free-anchor_sbn-all_8xb4-2x_nus-3d.py": {
+          "url": "https://raw.githubusercontent.com/open-mmlab/mmdetection3d/fe25f7a51d36e3702f961e198894580d83c4387b/configs/free_anchor/pointpillars_hv_fpn_head-free-anchor_sbn-all_8xb4-2x_nus-3d.py",
+          "sha256": "2e7f3456c793d2b9943465e69596310787a9460807147dde0a9c226ad14dfdb2"
         },
         "configs/_base_/models/pointpillars_hv_fpn_nus.py": {
           "url": "https://raw.githubusercontent.com/open-mmlab/mmdetection3d/fe25f7a51d36e3702f961e198894580d83c4387b/configs/_base_/models/pointpillars_hv_fpn_nus.py",
@@ -953,12 +953,12 @@
       "repository": "https://github.com/open-mmlab/mmdetection3d",
       "revision": "fe25f7a51d36e3702f961e198894580d83c4387b",
       "upstream_metrics": {
-        "mAP": 44.8,
-        "NDS": 56.4
+        "mAP": 43.82,
+        "NDS": 54.86
       },
-      "training_memory_gb": 17.3,
+      "training_memory_gb": 16.3,
       "runtime_status": "adapter_required",
-      "runtime_reason": "MVP native adaptation hiện chỉ hỗ trợ ST3D SECOND-IoU/PV-RCNN; gói MMDetection3D cần adapter tương ứng.",
+      "runtime_reason": "FreeAnchor3DHead chưa có train target / signed-ignore adaptation recipe; không dùng handler Anchor3DHead thay thế.",
       "runtime_verified": false,
       "publisher_sha256": null,
       "license_note": "Repository Apache-2.0; weights/dataset terms must be checked at upstream before redistribution.",

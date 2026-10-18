@@ -3,15 +3,20 @@ import streamlit as st
 from annoloop.model_hub import (load_catalog,recommendations,canonical,status,start_download,
                                 cancel_download,model_root,installed)
 from annoloop.io import read
-from components import hero,chips
+from components import hero,chips,live_fragment
 
 
 def size_label(value):
     return f'{value/1024**2:.1f} MiB' if value else 'chưa biết dung lượng'
 
 
-@st.fragment(run_every='2s')
 def download_progress(settings,model,namespace='',selected=False):
+    live=status(settings.data,model['id'])['status'] in ('queued','downloading')
+    _download_progress(settings,model,namespace,selected,live=live)
+
+
+@live_fragment('2s')
+def _download_progress(settings,model,namespace='',selected=False):
     state=status(settings.data,model['id']);mode=state['status']
     widget_id=model['id']+'_'+namespace
     labels={'not_installed':'Chưa tải','queued':'Đang mở worker','downloading':'Đang tải',

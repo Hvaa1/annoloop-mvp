@@ -14,6 +14,9 @@ from .settings import ROOT, Settings
 
 def model_identity(spec):
     """Use architecture from the YAML, never a progress-bar escape or run ID."""
+    if spec.get('mmdet_recipe'):
+        architecture=spec.get('architecture') or spec['mmdet_recipe']['head']
+        return dict(architecture=architecture,detector=None,label=architecture)
     import yaml
     path = Path(spec.get('config', ''))
     document = yaml.safe_load(path.read_text()) if path.is_file() else {}

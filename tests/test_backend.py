@@ -264,17 +264,56 @@ class BackendTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "vòng lặp"):
             load_config(path)
 
+    def test_trend_rule_accepts_non_decreasing_agreement_without_absolute_floor(self):
+        policy = SelectionPolicy(mode="automatic")
+        v2 = "accepted_pairs_over_confident_boxes_v2"
+        first = dict(metrics(count=100, agreement=.31), agreement_definition=v2)
+        self.assertEqual(decide(first, None, policy)["action"], "accept")  # baseline, guards only
+        legacy = metrics(count=100, agreement=.05)
+        self.assertEqual(decide(first, legacy, policy)["action"], "accept")  # other definition = baseline
+        self.assertFalse(decide(first, legacy, policy)["compared_with_previous"])
+        better = dict(first, agreement=.34)
+        self.assertEqual(decide(better, first, policy)["action"], "accept")
+        self.assertEqual(decide(dict(first), first, policy)["action"], "accept")  # equal is not a decrease
+        worse = dict(first, agreement=.30)
+        self.assertEqual(decide(worse, first, policy)["reasons"], ["agreement_decreased"])
+        burst = dict(better, box_count=200)
+        self.assertIn("box_growth_exceeded", decide(burst, first, policy)["reasons"])
+        empty = dict(better, supported_fraction=.5)
+        self.assertIn("supported_fraction_below_threshold", decide(empty, first, policy)["reasons"])
+        self.assertEqual(decide(better, first, SelectionPolicy())["action"], "review")  # manual mode
+
+    def test_agreement_regression_only_compares_same_definition(self):
+        policy = SelectionPolicy(mode="automatic", min_agreement=.3, agreement_rule="threshold")
+        old = metrics(count=10, agreement=.9)  # legacy definition: no agreement_definition key
+        new = dict(metrics(count=10, agreement=.35), agreement_definition="accepted_pairs_over_confident_boxes_v2")
+        self.assertNotIn("agreement_regressed", decide(new, old, policy)["reasons"])
+        later = dict(new, agreement=.2)
+        self.assertIn("agreement_regressed", decide(later, new, policy)["reasons"])
+
     def test_fusion_does_not_match_different_classes(self):
         positive, ignored = compare([box()], [box("truck", "b")])
         self.assertFalse(positive)
         self.assertEqual(len(ignored), 2)
 
-    def test_quality_tradeoff_is_ignore_and_never_average_box(self):
-        a, b = box(), box(identity="b")
+    def test_confident_tradeoff_keeps_higher_quality_real_box(self):
+        a, b = box(), box(identity="b", x=4.2)
         b.update(confidence=.9, quality=.6)
-        self.assertFalse(compare([a], [b])[0])
+        positive = compare([a], [b])[0]
+        self.assertEqual(positive[0]["id"], "a")
+        self.assertEqual(positive[0]["box"], a["box"])
+        self.assertEqual(positive[0]["partner_confidence"], .8)
         b["quality"] = .9
         self.assertEqual(compare([a], [b])[0][0]["id"], "b")
+
+    def test_unconfident_partner_is_conflict_even_if_dominated(self):
+        a, b = box(), box(identity="b")
+        b.update(confidence=.2, quality=.3)
+        positive, ignored = compare([a], [b])
+        self.assertFalse(positive)
+        self.assertEqual({x["reason"] for x in ignored}, {"quality_conflict"})
+        a.update(confidence=.5)
+        self.assertEqual({x["reason"] for x in compare([a], [b])[1]}, {"low_calibrated_quality"})
 
     def test_calibration_requires_source_and_correct_checkpoint(self):
         records = dict(domain="source_validation", boxes=[dict(class_name="car", cls_score=i/20, iou_score=i/20, source_gt_iou=i/20) for i in range(12)])

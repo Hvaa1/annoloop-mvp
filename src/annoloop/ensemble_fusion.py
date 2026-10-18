@@ -53,14 +53,19 @@ def fuse_frame(documents, providers, classes, points, policy=None):
                                 e['provider'], str(e['box']['id'])))
     clusters = []
     for entry in entries:
+        # Join the best-overlapping same-class seed, not merely the first one.
+        best, best_iou = None, policy.match_iou
         for cluster in clusters:
             seed = cluster[0]['box']
-            if seed['class_name'] == entry['box']['class_name'] and \
-               cuboid_iou(seed['box'], entry['box']['box']) >= policy.match_iou:
-                cluster.append(entry)
-                break
-        else:
+            if seed['class_name'] != entry['box']['class_name']:
+                continue
+            overlap = cuboid_iou(seed['box'], entry['box']['box'])
+            if overlap >= best_iou and (best is None or overlap > best_iou):
+                best, best_iou = cluster, overlap
+        if best is None:
             clusters.append([entry])
+        else:
+            best.append(entry)
     positive, ignored = [], []
     for index, cluster in enumerate(clusters):
         name = cluster[0]['box']['class_name']

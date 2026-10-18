@@ -18,9 +18,17 @@ def points_for(frame,fields,bin_columns=None):
         try:array=PointCloud.from_path(str(path)).numpy(tuple(fields))
         except (ValueError,KeyError) as e:raise ValueError('PCD thiếu feature thật: '+str(fields)) from e
     else:
+        names=frame.get('feature_names')
+        if path.suffix.lower()=='.bin':
+            from .point_format import binary_contract
+            contract=binary_contract(frame)
+            if contract:
+                names=contract['feature_names']
+                if bin_columns is not None and bin_columns!=len(names):
+                    raise ValueError('Số cột BIN không khớp khai báo dataset')
+                bin_columns=len(names)
         array=np.load(path,allow_pickle=False) if path.suffix.lower()=='.npy' else np.fromfile(path,dtype='<f4').reshape(-1,bin_columns) if path.suffix.lower()=='.bin' and bin_columns else None
         if array is None:raise ValueError('Cần NPY/PCD hoặc BIN đã khai báo số cột')
-        names=frame.get('feature_names')
         if names is None and array.ndim==2 and array.shape[1]==3:names=['x','y','z']
         if not names or array.ndim!=2 or len(names)!=array.shape[1] or len(set(names))!=len(names):
             raise ValueError('NPY/BIN cần feature_names đúng thứ tự cột; không đoán intensity/time')
@@ -99,6 +107,10 @@ def mmdetection3d(profile,request):
         raise ValueError('Model cần multi-sweep/time/ego pose; chưa thể dùng một frame thay thế')
     loader=loaders[0];load_dim=loader.get('load_dim',6)
     fields=request['frames'][0].get('feature_names')
+    if fields is None and Path(request['frames'][0]['media']).suffix.lower()=='.bin':
+        from .point_format import binary_contract
+        contract=binary_contract(request['frames'][0])
+        if contract:fields=contract['feature_names']
     if fields is None and load_dim==3:fields=['x','y','z']
     if not fields or len(fields)!=load_dim:raise ValueError('Cần khai báo feature_names đủ '+str(load_dim)+' cột của model')
     model=init_model(config,profile['checkpoint'],device=request['device'])

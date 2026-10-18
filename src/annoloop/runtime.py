@@ -80,6 +80,9 @@ def probe_runtime(spec,settings):
 
 
 def require_runtime(spec,settings):
+    if spec.get('framework')=='mmdetection3d' and spec.get('mmdet_recipe',{}).get('implementation_supported'):
+        from .mmdet_adapter import preflight
+        return preflight(settings)
     value=probe_runtime(spec,settings)
     if not value['ready']:
         raise ValueError('Môi trường model chưa sẵn sàng; chưa gửi trainer. '+value.get('error','')+

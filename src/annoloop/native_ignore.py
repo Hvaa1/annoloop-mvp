@@ -8,6 +8,7 @@ def install(model):
     from pcdet.ops.roiaware_pool3d.roiaware_pool3d_utils import points_in_boxes_gpu
 
     head = model.dense_head
+    model._annoloop_ignore_counts={'dense':0,'roi':0,'point':0}
     original = head.assign_targets
 
     def assign_dense(gt_boxes):
@@ -26,7 +27,9 @@ def install(model):
                 chunk = slice(start, start + 4096)
                 overlap = boxes3d_nearest_bev_iou(anchors[chunk, :7], ignored).max(dim=1)[0]
                 labels = targets['box_cls_labels'][index, chunk]
-                labels[(overlap >= .1) & (labels <= 0)] = -1
+                mask=(overlap >= .1) & (labels <= 0)
+                model._annoloop_ignore_counts['dense']+=int((mask & (labels==0)).sum().item())
+                labels[mask] = -1
         return targets
 
     if head.use_multihead:
@@ -39,6 +42,7 @@ def install(model):
             if len(ignored):
                 overlap = boxes_iou3d_gpu(output['rois'][index, :, :7], ignored).max(dim=1)[0]
                 mask = (overlap >= .1) & (output['reg_valid_mask'][index] == 0)
+                model._annoloop_ignore_counts['roi']+=int((mask & (output['rcnn_cls_labels'][index]!=-1)).sum().item())
                 output['rcnn_cls_labels'][index, mask] = -1
                 output['reg_valid_mask'][index, mask] = 0
         return output
@@ -59,7 +63,9 @@ def install(model):
                 inside = points_in_boxes_gpu(points, ignored.unsqueeze(0).contiguous())[0] >= 0
                 if len(positive):
                     inside &= points_in_boxes_gpu(points, positive.unsqueeze(0).contiguous())[0] < 0
-                targets['point_cls_labels'][indices[inside]] = -1
+                masked=indices[inside]
+                model._annoloop_ignore_counts['point']+=int((targets['point_cls_labels'][masked]!=-1).sum().item())
+                targets['point_cls_labels'][masked] = -1
             return targets
 
         model.point_head.assign_targets = assign_points

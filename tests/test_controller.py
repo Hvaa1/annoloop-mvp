@@ -58,6 +58,39 @@ class ControllerTests(unittest.TestCase):
         return RoundController(self.store, project, self.adapters, self.initial,
             point_loader=lambda frame: np.load(frame["media"]), gpu_guard=lambda: None, **kwargs)
 
+    def test_almost_empty_consensus_box_becomes_ignore_not_positive(self):
+        project=self.store.create('fixture',self.dataset)
+        controller=self.controller(project)
+        frames=[f for f in self.store.verify_dataset(project)['frames'] if f['split']=='adaptation']
+        def boxes(x):
+            return [dict(id='p'+str(x),class_name='car',box=[x,0.,0.,4.,2.,2.,0.],score=.9,confidence=.9,quality=.8)]
+        # Fixture cloud holds 10 points at x=4; a box at x=40 contains none.
+        for x,positive in ((4.,1),(40.,0)):
+            current={k:{f['frame_id']:boxes(x) for f in frames} for k in ('A','B')}
+            labels,proxies=controller.shared(frames,current)
+            row=labels['frames'][0]
+            self.assertEqual(len(row['boxes']),positive)
+            self.assertEqual(proxies['box_count'],1)  # consensus proxy is measured before the point rule
+            self.assertEqual(proxies['trained_box_count'],positive)
+            if not positive:
+                self.assertEqual([b['reason'] for b in row['ignored'] if b['reason']=='insufficient_points'],
+                                 ['insufficient_points'])
+                self.assertEqual(proxies['supported_fraction'],0.)
+
+    def test_agreement_counts_only_confident_boxes(self):
+        project=self.store.create('fixture',self.dataset)
+        controller=self.controller(project)
+        frames=[f for f in self.store.verify_dataset(project)['frames'] if f['split']=='adaptation']
+        def box(i,x,confidence):
+            return dict(id=i,class_name='car',box=[x,0.,0.,4.,2.,2.,0.],score=.5,confidence=confidence,quality=.8)
+        # One confirmed pair plus many low-confidence raw boxes that must not dilute agreement.
+        noise=[box('n'+str(i),20.+i*10,.1) for i in range(30)]
+        current={k:{f['frame_id']:[box(k+'1',4.,.9),*noise] for f in frames} for k in ('A','B')}
+        _,proxies=controller.shared(frames,current)
+        self.assertEqual(proxies['confident_box_denominator'],1)
+        self.assertEqual(proxies['agreement'],1.)
+        self.assertEqual(proxies['agreement_definition'],'accepted_pairs_over_confident_boxes_v2')
+
     def test_automatic_runs_budget_sequentially_with_shared_labels(self):
         project = self.store.create("fixture", self.dataset, max_rounds=2, execution_mode="automatic",
                                     policy=SelectionPolicy(mode="automatic"))
@@ -241,7 +274,7 @@ class ControllerTests(unittest.TestCase):
 
     def test_first_automatic_round_rejected_by_threshold_does_not_train_m2(self):
         project=self.store.create('fixture',self.dataset,max_rounds=3,execution_mode='automatic',
-                                  policy=SelectionPolicy(mode='automatic',min_agreement=.6))
+                                  policy=SelectionPolicy(mode='automatic',min_agreement=.6,agreement_rule='threshold'))
         controller=self.controller(project)
         original=controller.shared
         def low_agreement(*args):

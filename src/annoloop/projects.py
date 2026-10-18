@@ -86,9 +86,15 @@ class ProjectStore:
         inventory = read(root / "dataset.json")
         if digest(inventory["class_evidence"]["path"]) != inventory["class_evidence"]["sha256"]:
             raise ValueError("Schema/manifest đầu vào đã thay đổi")
+        formats=set()
         for frame in inventory["frames"]:
             if digest(frame["media"]) != frame["sha256"]:
                 raise ValueError("Media đầu vào đã thay đổi: " + frame["frame_id"])
+            evidence=frame.get('point_format_evidence')
+            if evidence and evidence['path'] not in formats:
+                if digest(evidence['path'])!=evidence['sha256']:
+                    raise ValueError('Khai báo point format đầu vào đã thay đổi')
+                formats.add(evidence['path'])
         return inventory
 
     def record_round(self, project_id, index, predictions, metrics, checkpoints, sample_predictions, work_directory=None,

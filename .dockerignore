@@ -1,0 +1,12 @@
+.git
+.venv*
+runtime/
+data/
+datasets/
+build/
+**/__pycache__
+**/*.so
+**/*.pyc
+vendor/ST3D/build
+resources/checkpoints/*
+!resources/checkpoints/README.md

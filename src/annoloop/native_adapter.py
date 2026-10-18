@@ -13,6 +13,7 @@ from .reused.training_monitor import process_identity
 
 
 class NativeDetectorAdapter(DetectorAdapter):
+    worker_module='annoloop.native_training'
     def __init__(self, candidate, classes, frames, output, settings, bin_columns=4):
         self.candidate = dict(candidate)
         for field, hash_key in (('path', 'checkpoint_sha256'), ('config', 'config_sha256')):
@@ -113,7 +114,7 @@ class NativeDetectorAdapter(DetectorAdapter):
               spec=spec, python=str(self.settings.trainer_python), created_at=now()))
         command = [str(self.settings.python), str(self.settings.training_launcher), '--run', str(root),
                    '--cwd', str(ROOT), '--name', f'AnnoLoop target · {self.candidate["architecture"]}', '--',
-                   str(self.settings.trainer_python), '-u', '-m', 'annoloop.native_training', '--run', str(root)]
+                   str(self.settings.trainer_python), '-u', '-m', self.worker_module, '--run', str(root)]
         subprocess.run(command, env=worker_environment(self.settings), text=True, capture_output=True, check=True)
         began = time.monotonic()
         try:

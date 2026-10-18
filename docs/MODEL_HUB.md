@@ -1,5 +1,10 @@
 # Kho checkpoint theo class
 
+Cập nhật: [recipe MMDetection3D](MMDET3D_ADAPTER.md) đã có code cho CenterHead/
+Anchor3DHead trên một số model một tầng. Script tải/cache tự nhận recipe;
+runtime và kiểm chứng dự án vẫn bắt buộc. Mô tả generic chưa có trainer bên
+dưới áp dụng ngoài phạm vi recipe này. Chưa có chứng nhận GPU MMDet thật.
+
 Ngoài kho generic, màn Class & model có [nguồn native ST3D/3DOD-LSF](NATIVE_SOURCES.md)
 cho hai checkpoint source-only đã pin: SECOND-IoU và PV-RCNN, class Vehicle / XYZ.
 Thiếu class mới học nguồn, không ép qua generic adapter rồi gặp chặn train.
@@ -11,9 +16,10 @@ Trong workflow dự án, chọn model ở **2 · Class & model** rồi tải/chu
 trong **Công cụ & hướng dẫn**, dùng tham khảo/tải gói ngoài dự án; không bắt
 người dùng chuyển qua thư viện rồi chọn lại model ở adaptation.
 
-Bước Class & model mặc định lọc trước bằng `model_filter.py`: class checkpoint,
-nhãn source train/validation, feature target và backend adaptation. Các model
-không phù hợp/chưa xác minh có bảng lý do riêng; raw predict/binding không được
+Bước Class & model mặc định lọc trước bằng `model_filter.py`: class checkpoint
+và feature target. Thiếu backend không ẩn model; input chưa rõ vẫn chọn được
+với trạng thái chờ xác minh. Nhãn source và quyền chạy được kiểm tra riêng sau
+tải. Các model có bảng lý do riêng; raw predict/binding không được
 coi là train support. Header tối đa16 frame rải đều, không load model/đọc gold.
 `input_contract` của registry phải có evidence trỏ config đã pin. Hiện chỉ hai
 gói SECOND KITTI và PointPillars nuScenes có contract feature được ghi rõ;
@@ -134,3 +140,12 @@ Google Drive của tác giả, cùng YAML/dataset config. SHA256 local:
 `4c83fc0fa02575b9b3e9dec676f698e7a70bb5a795e89f91df8a96b916fa19e2`.
 Hai gói mẫu không phải xác nhận mọi model trong registry đã tải trọn/chạy GPU;
 62link được probe binary, còn tải đầy đủ thực hiện khi người dùng chọn.
+## Cập nhật luồng chuẩn bị model
+
+Kho đề xuất theo class và hợp đồng đầu vào, tách khỏi quyền chạy adaptation.
+Thiếu backend không ẩn checkpoint; input chưa rõ ghi chờ xác minh. Tác vụ nền
+chỉ bắt đầu khi bấm **Tải, chuẩn bị adapter & kiểm tra model** ở bước chuẩn bị.
+Tải/binding thành công vẫn chưa đủ: cần predict/backward/ignore/calibration.
+Recipe generic còn thiếu phần train sẽ báo rõ và không mở adaptation.
+Xem [MODEL_PREPARATION.md](MODEL_PREPARATION.md).
+
